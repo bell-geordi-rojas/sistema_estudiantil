@@ -1,0 +1,29 @@
+{
+  "name": "estudiantil",
+  "version": "1.0.0",
+  "description": "Sistema Estudiantil",
+  "author": "Master's Corporation",
+  "main": "main.js",
+  "private": true,
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.masters.estudiantil",
+    "productName": "Estudiantil",
+    "artifactName": "Estudiantil-Setup.${ext}",
+    "directories": { "output": "dist", "buildResources": "." },
+    "files": ["main.js", "offline.html", "icon.png"],
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "icon": "icon.png" },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Estudiantil",
+      "language": "3082"
+    }
+  }
+}

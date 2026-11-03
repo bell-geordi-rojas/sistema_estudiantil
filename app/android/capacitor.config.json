@@ -1,0 +1,15 @@
+{
+  "appId": "com.masters.estudiantil",
+  "appName": "Estudiantil",
+  "webDir": "www",
+  "backgroundColor": "#0f1420",
+  "server": {
+    "url": "https://bell786u-ctrl.github.io/sistema_estudiantil/",
+    "cleartext": false,
+    "errorPath": "offline.html"
+  },
+  "android": {
+    "appendUserAgent": "EstudiantilApp",
+    "allowMixedContent": false
+  }
+}
