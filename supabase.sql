@@ -147,6 +147,27 @@ begin
 end $$;
 create index if not exists notas_estudiante_curso_periodo on notas (estudiante_id, curso_id, periodo_id);
 
+-- Nombre de la nota (examen, trabajo...) y comentario del docente.
+-- El comentario va en otra tabla para que solo lo vean el personal de la institucion y el propio alumno
+-- (un companero con permiso de ver notas ve las notas, pero no los comentarios).
+alter table notas add column if not exists titulo text check (titulo is null or length(titulo) between 1 and 60);
+create table if not exists notas_detalle (
+  nota_id bigint primary key references notas (id) on delete cascade,
+  comentario text not null check (length(comentario) between 1 and 500)
+);
+
+create or replace function _guardar_comentario(p_nota bigint, p_comentario text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  p_comentario := left(trim(coalesce(p_comentario, '')), 500);
+  if p_comentario = '' then
+    delete from notas_detalle where nota_id = p_nota;
+  else
+    insert into notas_detalle (nota_id, comentario) values (p_nota, p_comentario)
+      on conflict (nota_id) do update set comentario = excluded.comentario;
+  end if;
+end $$;
+
 create table if not exists solicitudes (
   id bigint generated always as identity primary key,
   institucion_id bigint not null references instituciones (id) on delete cascade,
@@ -258,6 +279,7 @@ alter table instituciones enable row level security;
 alter table perfiles enable row level security;
 alter table estudiantes enable row level security;
 alter table notas enable row level security;
+alter table notas_detalle enable row level security;
 alter table cursos enable row level security;
 alter table periodos enable row level security;
 alter table solicitudes enable row level security;
@@ -288,6 +310,11 @@ drop policy if exists notas_sel on notas;
 create policy notas_sel on notas for select to authenticated using (
   exists (select 1 from estudiantes e where e.id = notas.estudiante_id
           and (mi_rol() <> 'alumno' or e.perfil_id = auth.uid() or permiso('ver_notas_companeros'))));
+
+drop policy if exists nd_sel on notas_detalle;
+create policy nd_sel on notas_detalle for select to authenticated using (
+  exists (select 1 from notas n join estudiantes e on e.id = n.estudiante_id
+          where n.id = notas_detalle.nota_id and (mi_rol() <> 'alumno' or e.perfil_id = auth.uid())));
 
 drop policy if exists cursos_sel on cursos;
 create policy cursos_sel on cursos for select to authenticated using (mi_rol() = 'dueno' or institucion_id = mi_inst());
@@ -751,20 +778,23 @@ end $$;
 -- ---------------------------------------------------------------------------
 create or replace function registrar_estudiante(p_codigo text, p_nombre text, p_notas jsonb, p_docente uuid default null) returns bigint
 language plpgsql security definer set search_path = public as $$
-declare r rol_usuario := mi_rol(); v_inst bigint := mi_inst(); v_doc uuid; v_id bigint; x jsonb;
+declare r rol_usuario := mi_rol(); v_inst bigint := mi_inst(); v_doc uuid; v_id bigint; v_nota bigint; x jsonb;
 begin
   if r not in ('admin', 'docente') or not permiso('registrar_estudiantes') then raise exception 'No autorizado.'; end if;
   v_doc := case when r = 'docente' then auth.uid() else p_docente end;
   if v_doc is not null and not exists (select 1 from perfiles where id = v_doc and rol = 'docente' and institucion_id = v_inst) then
     raise exception 'Docente invalido.';
   end if;
-  -- p_notas: [{"curso": id, "periodo": id, "nota": 0-20, "peso": 1 (opcional)}]
+  -- p_notas: [{"curso": id, "periodo": id, "nota": 0-20, "peso": 1, "titulo": "Examen 1", "comentario": "..."}] (peso, titulo y comentario son opcionales)
   p_notas := coalesce(p_notas, '[]'::jsonb);
   if jsonb_typeof(p_notas) <> 'array' then raise exception 'Formato de notas invalido.'; end if;
   insert into estudiantes (institucion_id, docente_id, codigo, nombre) values (v_inst, v_doc, trim(p_codigo), trim(p_nombre)) returning id into v_id;
   for x in select * from jsonb_array_elements(p_notas) loop
-    insert into notas (estudiante_id, curso_id, periodo_id, nota, peso)
-      values (v_id, (x ->> 'curso')::bigint, (x ->> 'periodo')::bigint, (x ->> 'nota')::numeric, coalesce((x ->> 'peso')::smallint, 1));
+    insert into notas (estudiante_id, curso_id, periodo_id, nota, peso, titulo)
+      values (v_id, (x ->> 'curso')::bigint, (x ->> 'periodo')::bigint, (x ->> 'nota')::numeric, coalesce((x ->> 'peso')::smallint, 1),
+              nullif(left(trim(coalesce(x ->> 'titulo', '')), 60), ''))
+      returning id into v_nota;
+    perform _guardar_comentario(v_nota, x ->> 'comentario');
   end loop;
   return v_id;
 end $$;
@@ -795,21 +825,31 @@ begin
 end $$;
 
 drop function if exists agregar_nota(bigint, int, numeric);
-create or replace function agregar_nota(p_estudiante bigint, p_curso bigint, p_periodo bigint, p_nota numeric, p_peso int default 1) returns void
+drop function if exists agregar_nota(bigint, bigint, bigint, numeric, int);
+create or replace function agregar_nota(p_estudiante bigint, p_curso bigint, p_periodo bigint, p_nota numeric, p_peso int default 1,
+                                        p_titulo text default null, p_comentario text default null) returns void
 language plpgsql security definer set search_path = public as $$
+declare v_id bigint;
 begin
   if not permiso('editar_notas') or not _puedo_gestionar(p_estudiante) then raise exception 'No autorizado.'; end if;
-  insert into notas (estudiante_id, curso_id, periodo_id, nota, peso) values (p_estudiante, p_curso, p_periodo, p_nota, coalesce(p_peso, 1));
+  insert into notas (estudiante_id, curso_id, periodo_id, nota, peso, titulo)
+    values (p_estudiante, p_curso, p_periodo, p_nota, coalesce(p_peso, 1), nullif(left(trim(coalesce(p_titulo, '')), 60), ''))
+    returning id into v_id;
+  perform _guardar_comentario(v_id, p_comentario);
 end $$;
 
+-- Al editar, titulo y comentario se reemplazan siempre (vacio = quitarlos); el peso solo cambia si se envia
 drop function if exists actualizar_nota(bigint, numeric);
-create or replace function actualizar_nota(p_id bigint, p_nota numeric, p_peso int default null) returns void
+drop function if exists actualizar_nota(bigint, numeric, int);
+create or replace function actualizar_nota(p_id bigint, p_nota numeric, p_peso int default null,
+                                           p_titulo text default null, p_comentario text default null) returns void
 language plpgsql security definer set search_path = public as $$
 declare v_est bigint;
 begin
   select estudiante_id into v_est from notas where id = p_id;
   if v_est is null or not permiso('editar_notas') or not _puedo_gestionar(v_est) then raise exception 'No autorizado.'; end if;
-  update notas set nota = p_nota, peso = coalesce(p_peso, peso) where id = p_id;
+  update notas set nota = p_nota, peso = coalesce(p_peso, peso), titulo = nullif(left(trim(coalesce(p_titulo, '')), 60), '') where id = p_id;
+  perform _guardar_comentario(p_id, p_comentario);
 end $$;
 
 create or replace function eliminar_nota(p_id bigint) returns void
@@ -857,7 +897,7 @@ begin
   for f in select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname = any (array[
              '_generar_usuario', '_crear_invitacion', '_puede_resolver_solicitud', '_puede_invitacion', '_puedo_gestionar', '_alcance_perfil', 'crear_invitacion_dueno',
-             '_sembrar_institucion', '_puede_cursos'])
+             '_sembrar_institucion', '_puede_cursos', '_guardar_comentario'])
   loop
     execute format('revoke all on function %s from public, anon, authenticated', f);
   end loop;

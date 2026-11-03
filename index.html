@@ -69,8 +69,10 @@ small,.who small{color:var(--mute);font-size:11px}
 .btn.sec:hover{background:var(--hover)}
 .btn.sm{padding:4px 10px;font-size:12px}
 .btn.del{background:var(--card);color:var(--red);border:1px solid var(--danger-bd);padding:4px 10px;font-size:12px}
-input,select{font:inherit;padding:8px 10px;border:1px solid var(--input-bd);border-radius:7px;background:var(--input-bg);color:var(--ink);min-width:0}
-input:focus,select:focus{outline:2px solid var(--focus);border-color:var(--teal)}
+input,select,textarea{font:inherit;padding:8px 10px;border:1px solid var(--input-bd);border-radius:7px;background:var(--input-bg);color:var(--ink);min-width:0}
+textarea{resize:vertical}
+.curso input[data-titulo],.curso input[data-coment]{width:100%;font-size:13px;padding:6px 9px}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--focus);border-color:var(--teal)}
 .form{display:grid;gap:12px;max-width:460px}
 .form.wide{max-width:980px}
 .form label{display:grid;gap:4px;font-weight:600;font-size:13px}
@@ -252,7 +254,8 @@ class Estudiante {
   constructor(d) {
     this.id = d.id; this.codigo = d.codigo; this.nombre = d.nombre; this.docente_id = d.docente_id;
     this.perfil_id = d.perfil_id; this.institucion_id = d.institucion_id;
-    this.notas = (d.notas || []).map(n => ({ id: n.id, curso: n.curso_id, periodo: n.periodo_id, v: Number(n.nota), peso: n.peso || 1 })).sort((a, b) => a.id - b.id);
+    this.notas = (d.notas || []).map(n => ({ id: n.id, curso: n.curso_id, periodo: n.periodo_id, v: Number(n.nota), peso: n.peso || 1,
+      titulo: n.titulo || "", comentario: (n.notas_detalle && n.notas_detalle.comentario) || "" })).sort((a, b) => a.id - b.id);
   }
   de(per) { return per ? this.notas.filter(n => n.periodo === per) : this.notas; }
   deCurso(c, per = periodoSel) { return this.de(per).filter(n => n.curso === c); }
@@ -267,7 +270,7 @@ class Estudiante {
 let yo = null, permisos = {};
 let est = [], perfiles = [], insts = [], solic = [], invs = [], cursos = [], periodos = [];
 let vista = "panel", orden = 0, filtro = "", detalleId = null, borrador = [], kBorr = 0, periodoSel = null;
-let tabLogin = "ingresar", instSel = null, avisoCarga = "", estadoSis = null, perAddSel = null;
+let tabLogin = "ingresar", instSel = null, avisoCarga = "", estadoSis = null;
 const esUni = () => !!(yo && yo.institucion && yo.institucion.tipo === "universidad");
 const cursosDe = id => cursos.filter(c => c.institucion_id === id);
 const periodosDe = id => periodos.filter(p => p.institucion_id === id);
@@ -285,7 +288,7 @@ const perfilDe = id => perfiles.find(p => p.id === id);
 const docentesDe = instId => perfiles.filter(p => p.rol === "docente" && p.institucion_id === instId);
 const instDe = id => insts.find(i => i.id === id);
 
-const SEL_EST = "estudiantes?select=id,codigo,nombre,docente_id,perfil_id,institucion_id,notas(id,curso_id,periodo_id,nota,peso)&order=id";
+const SEL_EST = "estudiantes?select=id,codigo,nombre,docente_id,perfil_id,institucion_id,notas(id,curso_id,periodo_id,nota,peso,titulo,notas_detalle(comentario))&order=id";
 async function recargarEst() { est = (await sel(SEL_EST)).map(d => new Estudiante(d)); }
 async function cargarDatos() {
   const gest = puedeGestionar();
@@ -376,7 +379,24 @@ function filas(lista, { acciones = true, soloNombres = false } = {}) {
 }
 // Una nota como etiqueta: «v» o «v ×peso»; con todos los periodos a la vista también muestra a cuál pertenece
 const pesoTxt = n => n.peso > 1 ? `<sup>×${n.peso}</sup>` : "";
-const notaChip = (n, extra = "") => `<span class="note">${periodoSel ? "" : `<small>${esc(abrevPer(periodoDe(n.periodo)))}</small> `}${n.v}${pesoTxt(n)}${extra}</span>`;
+const corto = (t, m) => t.length > m ? t.slice(0, m - 1) + "…" : t;
+const tituloNota = n => n.titulo ? `<small>${esc(corto(n.titulo, 16))}</small> ` : "";
+const notaChip = (n, extra = "", mostrarPer = !periodoSel) => `<span class="note" title="${esc([n.titulo, n.comentario].filter(Boolean).join(" — "))}">${mostrarPer ? `<small>${esc(abrevPer(periodoDe(n.periodo)))}</small> ` : ""}${tituloNota(n)}${n.v}${pesoTxt(n)}${n.comentario ? " 💬" : ""}${extra}</span>`;
+// Tarjeta de un curso con sus notas y los campos para agregar una (nombre, nota, peso y comentario)
+const tarjetaCurso = (c, chips, prom, accion) => `<div class="curso"><h3>${esc(c.nombre)}<small>${prom}</small></h3>
+  <div class="chips">${chips || "<em>Sin notas</em>"}</div>
+  <input data-titulo="${c.id}" maxlength="60" placeholder="Nombre (examen, trabajo…)" aria-label="Nombre de la nota de ${esc(c.nombre)}">
+  <div class="add"><input data-nota="${c.id}" inputmode="decimal" placeholder="Nota (0–20)" aria-label="Nueva nota de ${esc(c.nombre)}">${esUni() ? pesoSelect(`data-peso="${c.id}"`) : ""}<button type="button" class="btn" data-a="${accion}" data-c="${c.id}">+</button></div>
+  <input data-coment="${c.id}" maxlength="500" placeholder="Comentario (opcional)" aria-label="Comentario de la nota de ${esc(c.nombre)}"></div>`;
+// Lista detallada de calificaciones (nombre, nota, peso y comentario): la ve el alumno en «Mis comentarios»
+function listaNotas(e) {
+  const cs = cursosDe(e.institucion_id), orden = new Map(cs.map((c, i) => [c.id, i]));
+  const ns = e.de(periodoSel).slice().sort((a, b) => (orden.get(a.curso) - orden.get(b.curso)) || a.id - b.id);
+  if (!ns.length) return `<div class="empty">Aún no hay calificaciones registradas.</div>`;
+  return `<div class="scroll"><table><thead><tr><th>Curso</th><th>${nomPeriodo(yo.institucion.tipo)}</th><th>Nombre</th><th>Nota</th>${esUni() ? "<th>Peso</th>" : ""}<th>Comentario</th></tr></thead><tbody>` +
+    ns.map(n => { const c = cursoDe(n.curso), p = periodoDe(n.periodo);
+      return `<tr><td>${c ? esc(c.nombre) : "—"}</td><td>${p ? esc(p.nombre) : "—"}</td><td>${n.titulo ? esc(n.titulo) : "<small>—</small>"}</td><td><span class="note">${n.v}</span></td>${esUni() ? `<td>${n.peso}</td>` : ""}<td>${n.comentario ? esc(n.comentario) : "<small>—</small>"}</td></tr>`; }).join("") + `</tbody></table></div>`;
+}
 const pesoSelect = attr => `<select ${attr} title="Peso de la nota (si no eliges, vale 1)" style="width:84px">${PESOS.map(p => `<option value="${p}">Peso ${p}</option>`).join("")}</select>`;
 function selPeriodo() {
   const ps = misPeriodos(); if (!ps.length) return "";
@@ -398,24 +418,56 @@ function cursosHTML() {
   const cs = miCursos();
   if (!cs.length) return `<div class="empty">Aún no hay cursos. Agrégalos en «Cursos y ${nomPeriodos(yo.institucion.tipo)}».</div>`;
   return cs.map(c => { const ns = borrador.filter(n => n.curso === c.id);
-    return `<div class="curso"><h3>${esc(c.nombre)}<small>${ns.length ? "prom. " + fmt(mediaPond(ns)) : "sin notas"}</small></h3>
-    <div class="chips">${ns.length ? ns.map(n => `<span class="note rm" data-a="b-rm" data-k="${n.k}" title="Quitar">${esc(abrevPer(periodoDe(n.periodo)))} · ${n.v}${pesoTxt(n)}</span>`).join("") : "<em>Sin notas</em>"}</div>
-    <div class="add"><input data-nota="${c.id}" inputmode="decimal" placeholder="Nota (0–20)" aria-label="Nueva nota de ${esc(c.nombre)}">${esUni() ? pesoSelect(`data-peso="${c.id}"`) : ""}<button type="button" class="btn" data-a="b-add" data-c="${c.id}">+</button></div></div>`; }).join("");
+    return tarjetaCurso(c, ns.map(n => `<span class="note rm" data-a="b-rm" data-k="${n.k}" title="Quitar${n.comentario ? " · " + esc(n.comentario) : ""}">${esc(abrevPer(periodoDe(n.periodo)))} · ${tituloNota(n)}${n.v}${pesoTxt(n)}${n.comentario ? " 💬" : ""}</span>`).join(""),
+      ns.length ? "prom. " + fmt(mediaPond(ns)) : "sin notas", "b-add"); }).join("");
+}
+// Lee los campos de una tarjeta de curso; devuelve null (y muestra el error) si la nota no es válida
+function leerTarjeta(c) {
+  const err = $("#err"), v = convertirDouble($(`[data-nota="${c}"]`).value), ps = $(`[data-peso="${c}"]`);
+  if (!notaValida(v)) { err.textContent = `${cursoDe(c).nombre}: la calificación debe ser un número entre ${NOTA_MIN} y ${NOTA_MAX}.`; $(`[data-nota="${c}"]`).focus(); return null; }
+  return { v, peso: ps ? Number(ps.value) : 1, titulo: $(`[data-titulo="${c}"]`).value.trim(), comentario: $(`[data-coment="${c}"]`).value.trim() };
 }
 function repintarCursos(foco) { $("#cursosReg").innerHTML = cursosHTML(); if (foco !== undefined) $(`[data-nota="${foco}"]`).focus(); }
 function agregarBorrador(c) {
-  const inp = $(`[data-nota="${c}"]`), err = $("#err"), v = convertirDouble(inp.value), per = Number($("#perReg").value), cu = cursoDe(c);
-  if (!notaValida(v)) { err.textContent = `${cu.nombre}: la calificación debe ser un número entre ${NOTA_MIN} y ${NOTA_MAX}.`; inp.focus(); return; }
+  const err = $("#err"), per = Number($("#perReg").value), cu = cursoDe(c), t = leerTarjeta(c); if (!t) return;
   if (!per) { err.textContent = "Elige el periodo de la nota."; return; }
   if (borrador.filter(n => n.curso === c && n.periodo === per).length >= MAX_NOTAS) { err.textContent = `${cu.nombre}: máximo ${MAX_NOTAS} calificaciones por periodo.`; return; }
-  const ps = $(`[data-peso="${c}"]`);
-  err.textContent = ""; borrador.push({ k: ++kBorr, curso: c, periodo: per, v, peso: ps ? Number(ps.value) : 1 }); repintarCursos(c);
+  err.textContent = ""; borrador.push({ k: ++kBorr, curso: c, periodo: per, ...t }); repintarCursos(c);
+}
+
+/* ===== Agregar calificaciones a un estudiante existente (tarjetas por curso) ===== */
+let calEstId = null;
+const calEstudiante = () => { const i = $("#calCodigo"); return i && i.value.trim() ? buscarPorCodigo(i.value) : null; };
+function calPeriodo() { const s = $("#perCal"); return s ? Number(s.value) : 0; }
+function cursosCalHTML() {
+  const cs = miCursos(), e = calEstudiante(), per = calPeriodo();
+  if (!cs.length) return `<div class="empty">Aún no hay cursos. Agrégalos en «Cursos y ${nomPeriodos(yo.institucion.tipo)}».</div>`;
+  return cs.map(c => { const ns = e ? e.deCurso(c.id, per) : [];
+    return tarjetaCurso(c, ns.map(n => notaChip(n, "", false)).join(""), ns.length ? "prom. " + fmt(mediaPond(ns)) : "sin notas", "c-add"); }).join("");
+}
+function repintarCal(foco) {
+  const e = calEstudiante(); calEstId = e ? e.id : null;
+  $("#cursosCal").innerHTML = cursosCalHTML();
+  $("#calInfo").innerHTML = e ? `✔ <b>${esc(e.nombre)}</b> · ${esc(e.codigo)}` : ($("#calCodigo").value.trim() ? "No se encontró ningún estudiante con ese código." : "Escribe el código del estudiante para ver y agregar sus notas.");
+  $("#calInfo").className = e ? "msg" : "msg warn";
+  if (foco !== undefined) $(`[data-nota="${foco}"]`).focus();
+}
+async function agregarCal(c) {
+  const err = $("#err"), e = calEstudiante(), per = calPeriodo(); err.textContent = "";
+  if (!e) { err.textContent = "Escribe el código de un estudiante existente."; $("#calCodigo").focus(); return; }
+  if (!per) { err.textContent = "Elige el periodo de la nota."; return; }
+  const t = leerTarjeta(c); if (!t) return;
+  try { await rpc("agregar_nota", { p_estudiante: e.id, p_curso: c, p_periodo: per, p_nota: t.v, p_peso: t.peso, p_titulo: t.titulo || null, p_comentario: t.comentario || null }); }
+  catch (x) { err.textContent = x.message; return; }
+  await recargarEst(); repintarCal(c);
+  const act = est.find(x => x.id === e.id);
+  toast(`Calificación agregada. Promedio en ${cursoDe(c).nombre} (${periodoDe(per).nombre}): ${fmt(act.promedioCurso(c, per))} | General: ${fmt(act.promedio(per))}`);
 }
 
 /* ===== Vistas ===== */
 function vistasDisponibles() {
   const r = yo.rol, p = permisos, v = [["panel", "▦", "Panel principal"]];
-  if (r === "alumno") { v.push(["mis", "★", "Mis notas"]); if (p.ver_companeros) v.push(["lista", "☰", "Mis compañeros"]); }
+  if (r === "alumno") { v.push(["mis", "★", "Mis notas"]); v.push(["comentarios", "✎", "Mis comentarios"]); if (p.ver_companeros) v.push(["lista", "☰", "Mis compañeros"]); }
   else v.push(["lista", "☰", r === "dueno" ? "Estudiantes (lectura)" : "Estudiantes"]);
   if (esStaff() && p.registrar_estudiantes) v.push(["registrar", "＋", "Registrar estudiante"]);
   if (esStaff() && p.editar_notas) v.push(["calificar", "✎", "Agregar calificación"]);
@@ -452,6 +504,12 @@ function vMis() {
     <div class="kpi"><span>Notas registradas</span><b>${e.totalNotas()}</b></div><div class="kpi"><span>Estado</span><b style="font-size:20px">${pill(e)}</b></div></div>
     <div class="card"><h2>Mis calificaciones por curso</h2>${detalleTabla(e)}</div>`;
 }
+function vComentarios() {
+  const e = est.find(x => x.perfil_id === yo.id);
+  if (!e) return `<div class="card"><h2>Mis comentarios</h2><div class="empty">Tu cuenta aún no tiene un registro de notas asociado.</div></div>`;
+  return `<div class="bar"><span class="chip on">${esc(yo.institucion.nombre)}</span>${selPeriodo()}</div>
+    <div class="card"><h2>Detalle de mis calificaciones y comentarios</h2>${listaNotas(e)}</div>`;
+}
 function vLista() {
   const alumno = yo.rol === "alumno";
   let l = est.filter(e => alumno ? e.perfil_id !== yo.id : true).filter(e => (e.nombre + e.codigo).toLowerCase().includes(filtro.toLowerCase()));
@@ -473,14 +531,15 @@ function vRegistrar() {
     <div class="err" id="err"></div><div><button class="btn">Registrar y guardar</button></div></form></div>`;
 }
 function vCalificar() {
-  return `<div class="card"><h2>Agregar calificación</h2><form class="form" id="fCal">
-    <label>Estudiante (código)<input name="codigo" list="cods" required autocomplete="off"></label>
+  calEstId = null;
+  return `<div class="card"><h2>Agregar calificaciones</h2><div class="form wide">
+    <div class="datos"><label>Estudiante (código)<input id="calCodigo" list="cods" autocomplete="off"></label>
+    <label>${nomPeriodo(yo.institucion.tipo)}<select id="perCal">${misPeriodos().map(p => `<option value="${p.id}" ${p.id === periodoSel ? "selected" : ""}>${esc(p.nombre)}</option>`).join("")}</select></label></div>
     <datalist id="cods">${est.map(e => `<option value="${esc(e.codigo)}">${esc(e.nombre)}</option>`).join("")}</datalist>
-    <div class="row2"><label>Curso<select name="curso">${miCursos().map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join("") || "<option value=''>(agrega cursos primero)</option>"}</select></label>
-    <label>${nomPeriodo(yo.institucion.tipo)}<select name="periodo">${misPeriodos().map(p => `<option value="${p.id}" ${p.id === periodoSel ? "selected" : ""}>${esc(p.nombre)}</option>`).join("")}</select></label></div>
-    <div class="row2"><label>Nueva calificación<input name="nota" required inputmode="decimal"></label>
-    ${esUni() ? `<label>Peso (opcional, si no eliges vale 1)<select name="peso">${PESOS.map(p => `<option value="${p}">${p}</option>`).join("")}</select></label>` : ""}</div>
-    <div class="err" id="err"></div><div><button class="btn">Agregar</button></div></form></div>`;
+    <div class="msg warn" id="calInfo">Escribe el código del estudiante para ver y agregar sus notas.</div>
+    <div style="font-weight:600;font-size:13px">Notas por curso <span style="color:var(--mute);font-weight:400">(cada «+» guarda la nota al instante${esUni() ? "; el peso por defecto es 1" : ""})</span></div>
+    <div class="cursos" id="cursosCal">${cursosCalHTML()}</div>
+    <div class="err" id="err"></div></div></div>`;
 }
 function vBuscar() {
   return `<div class="card"><h2>Buscar por código</h2><form class="bar" id="fBus"><input name="codigo" placeholder="Código" required><button class="btn">Buscar</button></form><div id="res"></div></div>`;
@@ -638,7 +697,7 @@ function pantallaApp() {
   let cuerpo;
   if (avisoCarga) cuerpo = `<div class="card"><h2>No se pudieron cargar los datos</h2><p class="err">${esc(avisoCarga)}</p><button class="btn" data-a="reintentar">Reintentar</button></div>`;
   else cuerpo = { panel: vPanel, mis: vMis, lista: vLista, registrar: vRegistrar, calificar: vCalificar, buscar: vBuscar, estadisticas: vEstadisticas,
-    usuarios: vUsuarios, solicitudes: vSolicitudes, invitar: vInvitar, instituciones: vInstituciones, carpetas: vCarpetas, cuenta: vCuenta, config: vConfig }[vista]();
+    usuarios: vUsuarios, solicitudes: vSolicitudes, invitar: vInvitar, instituciones: vInstituciones, carpetas: vCarpetas, cuenta: vCuenta, config: vConfig, comentarios: vComentarios }[vista]();
   const aviso = yo.rol === "dueno" && yo.mantenimiento ? `<div class="msg warn" style="border-radius:0;text-align:center">⚠ El sistema está en mantenimiento: solo tú puedes usarlo. Reanúdalo en «Instituciones».</div>` : "";
   return `${cabecera(true)}${aviso}<div class="layout"><nav>${nav}</nav><main id="main">${cuerpo}</main></div>`;
 }
@@ -658,16 +717,30 @@ function renderDetalle() {
   const staff = esStaff(), eNotas = staff && permisos.editar_notas, eDatos = staff && permisos.editar_estudiantes, eDel = staff && permisos.eliminar;
   const doc = perfilDe(e.docente_id), docs = yo.rol === "admin" ? docentesDe(yo.institucion.id) : [];
   abrirDlg(`<div class="dhead">${avatarDe(e.nombre, e.codigo)}<div><b>${esc(e.nombre)}</b><small>${esc(e.codigo)} · Docente: ${doc ? esc(nombreCompleto(doc)) : "—"}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>
-    <div class="bar">${selPeriodo()}${eNotas ? `<label style="display:flex;gap:6px;align-items:center">Nuevas notas en: <select id="perAdd">${periodosDe(e.institucion_id).map(p => `<option value="${p.id}" ${p.id === (periodoSel || perAddSel) ? "selected" : ""}>${esc(p.nombre)}</option>`).join("")}</select></label>` : ""}</div>
+    <div class="bar">${selPeriodo()}</div>
     <div class="scroll"><table><thead><tr><th>Curso</th><th>Calificaciones</th><th>${esUni() ? "Prom. ponderado" : "Promedio"}</th></tr></thead><tbody>` +
     (cursosDe(e.institucion_id).map(c => { const v = e.deCurso(c.id);
-      return `<tr><td>${esc(c.nombre)}</td><td>${v.length ? v.map(n => notaChip(n, eNotas ? `<button class="mini" data-a="nota-ed" data-id="${n.id}" data-val="${n.v}" data-pn="${n.peso}" title="Editar">✎</button><button class="mini" data-a="nota-rm" data-id="${n.id}" title="Quitar">×</button>` : "")).join("") : "<small>(sin notas)</small>"}
-      ${eNotas ? `<span class="add" style="display:inline-flex;margin-left:6px"><input data-nuevanota="${c.id}" inputmode="decimal" placeholder="Nueva" style="width:80px;padding:4px 8px">${esUni() ? pesoSelect(`data-nuevopeso="${c.id}"`) : ""}<button class="btn sm" data-a="nota-add" data-c="${c.id}">+</button></span>` : ""}</td>
+      return `<tr><td>${esc(c.nombre)}</td><td>${v.length ? v.map(n => notaChip(n, eNotas ? `<button class="mini" data-a="nota-ed" data-id="${n.id}" title="Editar">✎</button><button class="mini" data-a="nota-rm" data-id="${n.id}" title="Quitar">×</button>` : "")).join("") : "<small>(sin notas)</small>"}
+      ${eNotas ? `<button class="btn sm sec" data-a="nota-nueva" data-c="${c.id}" title="Agregar una nota a este curso">+ Nota</button>` : ""}</td>
       <td>${v.length ? `<b>${fmt(mediaPond(v))}</b>` : "–"}</td></tr>`; }).join("") || `<tr><td colspan="3"><small>La institución aún no tiene cursos.</small></td></tr>`) + `</tbody></table></div>${resumenPeriodos(e)}
     <p style="margin:12px 0 0">${esUni() ? "Promedio ponderado" : "Promedio general"}${periodoSel ? ` (${esc(periodoDe(periodoSel).nombre)})` : ""}: <b>${e.totalNotas() ? fmt(e.promedio()) : "—"}</b> · ${pill(e)}</p>` +
     (eDatos ? `<hr style="border:0;border-top:1px solid var(--line);margin:14px 0"><form class="bar" id="fEstDet"><input name="codigo" value="${esc(e.codigo)}" required style="width:130px"><input name="nombre" value="${esc(e.nombre)}" required style="flex:1;min-width:180px"><button class="btn sm">Guardar datos</button></form><div class="err" id="errDet"></div>` : `<div class="err" id="errDet"></div>`) +
     (yo.rol === "admin" ? `<div class="bar"><select id="selDoc"><option value="">Sin docente</option>${docs.map(d => `<option value="${d.id}" ${d.id === e.docente_id ? "selected" : ""}>${esc(nombreCompleto(d))}</option>`).join("")}</select><button class="btn sm sec" data-a="reasignar">Cambiar docente</button></div>` : "") +
     (eDel ? `<button class="btn del" data-a="borrar-est-det">Eliminar estudiante</button>` : ""));
+}
+// Formulario para agregar (id = null, con el curso elegido) o editar una calificación del estudiante abierto
+function formNota(id, curso) {
+  const e = est.find(x => x.id === detalleId); if (!e) return;
+  const n = id ? e.notas.find(x => x.id === id) : null; if (id && !n) return;
+  const c = cursoDe(n ? n.curso : curso), pesos = [...new Set([...PESOS, n ? n.peso : 1])].sort((a, b) => a - b);
+  abrirDlg(`<div class="dhead"><div><b>${n ? "Editar calificación" : "Nueva calificación"}</b><small>${esc(e.nombre)} · ${esc(c.nombre)}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>
+    <form class="form" id="fNota" data-id="${id || ""}" data-curso="${c.id}" style="max-width:none">
+    ${n ? "" : `<label>${nomPeriodo(yo.institucion.tipo)}<select name="periodo">${periodosDe(e.institucion_id).map(p => `<option value="${p.id}" ${p.id === periodoSel ? "selected" : ""}>${esc(p.nombre)}</option>`).join("")}</select></label>`}
+    <label>Nombre (examen, trabajo…)<input name="titulo" maxlength="60" value="${esc(n ? n.titulo : "")}" placeholder="Opcional"></label>
+    <div class="row2"><label>Nota (0–20)<input name="nota" required inputmode="decimal" value="${n ? n.v : ""}"></label>
+    ${esUni() ? `<label>Peso (si no eliges, vale 1)<select name="peso">${pesos.map(p => `<option value="${p}" ${n && n.peso === p ? "selected" : ""}>${p}</option>`).join("")}</select></label>` : ""}</div>
+    <label>Comentario<textarea name="comentario" maxlength="500" rows="3" placeholder="Opcional: lo verá el alumno">${esc(n ? n.comentario : "")}</textarea></label>
+    <div class="err"></div><div class="bar"><button class="btn">Guardar</button><button type="button" class="btn sec" data-a="volver-det">Volver</button></div></form>`);
 }
 function mostrarCredenciales(v, titulo = "Cuenta creada") {
   abrirDlg(`<div class="dhead"><div><b>${esc(titulo)}</b><small>${ROL[v.rol] || ""}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>
@@ -704,23 +777,10 @@ const acciones = {
     const e = est.find(x => x.id === detalleId);
     if (e && confirm(`¿Eliminar a '${e.nombre}' y todas sus notas?`)) { await rpc("eliminar_estudiante", { p_id: e.id }); cerrarDlg(); await recargarTodo(); toast("Estudiante eliminado."); }
   },
-  async "nota-add"(d) {
-    const inp = $(`[data-nuevanota="${d.c}"]`), v = convertirDouble(inp.value), per = Number($("#perAdd").value), ps = $(`[data-nuevopeso="${d.c}"]`);
-    if (!notaValida(v)) { $("#errDet").textContent = `La calificación debe ser un número entre ${NOTA_MIN} y ${NOTA_MAX}.`; return; }
-    if (!per) { $("#errDet").textContent = "Elige el periodo de la nota."; return; }
-    $("#errDet").textContent = "";
-    await rpc("agregar_nota", { p_estudiante: detalleId, p_curso: Number(d.c), p_periodo: per, p_nota: v, p_peso: ps ? Number(ps.value) : 1 }); await recargarEst(); renderDetalle(); render();
-  },
-  async "nota-ed"(d) {
-    const uni = esUni();
-    const txt = prompt(uni ? `Nueva calificación (${NOTA_MIN}–${NOTA_MAX}). Si tiene peso, escribe «nota x peso», por ejemplo: 15 x 3` : `Nueva calificación (${NOTA_MIN}–${NOTA_MAX})`, uni && Number(d.pn) > 1 ? `${d.val} x ${d.pn}` : d.val);
-    if (txt === null) return;
-    const m = txt.trim().match(/^([^x×*\s]+)\s*(?:[x×*]\s*(\d+))?$/i), v = m ? convertirDouble(m[1].replace(",", ".")) : null;
-    if (!notaValida(v)) { toast(`La calificación debe ser un número entre ${NOTA_MIN} y ${NOTA_MAX}.`); return; }
-    const peso = m[2] ? Number(m[2]) : null;
-    if (peso !== null && (!uni || peso < 1 || peso > 10)) { toast(uni ? "El peso debe ser un número del 1 al 10." : "Solo las universidades usan pesos."); return; }
-    await rpc("actualizar_nota", { p_id: idNum(d), p_nota: v, p_peso: peso ?? (uni ? 1 : null) }); await recargarEst(); renderDetalle(); render();
-  },
+  "nota-nueva"(d) { formNota(null, Number(d.c)); },
+  "nota-ed"(d) { formNota(idNum(d)); },
+  "volver-det"() { renderDetalle(); },
+  async "c-add"(d) { await agregarCal(Number(d.c)); },
   async "nota-rm"(d) { if (confirm("¿Quitar esta calificación?")) { await rpc("eliminar_nota", { p_id: idNum(d) }); await recargarEst(); renderDetalle(); render(); } },
   async reasignar() {
     await rpc("reasignar_docente", { p_id: detalleId, p_docente: $("#selDoc").value || null }); await recargarEst(); renderDetalle(); render(); toast("Docente actualizado.");
@@ -782,10 +842,10 @@ const acciones = {
     const campo = s => { s = String(s); return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const filasCSV = [];
     for (const e of est) {
-      if (!e.notas.length) filasCSV.push([e.codigo, e.nombre, "", "", "", ""]);
-      for (const n of e.notas) filasCSV.push([e.codigo, e.nombre, (periodoDe(n.periodo) || {}).nombre || "", (cursoDe(n.curso) || {}).nombre || "", n.v, n.peso]);
+      if (!e.notas.length) filasCSV.push([e.codigo, e.nombre, "", "", "", "", "", ""]);
+      for (const n of e.notas) filasCSV.push([e.codigo, e.nombre, (periodoDe(n.periodo) || {}).nombre || "", (cursoDe(n.curso) || {}).nombre || "", n.v, n.peso, n.titulo, n.comentario]);
     }
-    const csv = ["codigo", "nombre", "periodo", "curso", "nota", "peso"].join(",") + "\r\n" + filasCSV.map(f => f.map(campo).join(",")).join("\r\n") + "\r\n";
+    const csv = ["codigo", "nombre", "periodo", "curso", "nota", "peso", "titulo", "comentario"].join(",") + "\r\n" + filasCSV.map(f => f.map(campo).join(",")).join("\r\n") + "\r\n";
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" })); a.download = "estudiantes.csv"; a.click();
   },
   async import() {
@@ -817,13 +877,14 @@ document.addEventListener("click", async ev => {
 document.addEventListener("keydown", ev => {
   if (ev.key !== "Enter") return;
   const t = ev.target;
-  if (t.dataset && t.dataset.nota !== undefined) { ev.preventDefault(); agregarBorrador(Number(t.dataset.nota)); }
-  else if (t.dataset && t.dataset.nuevanota !== undefined) { ev.preventDefault(); acciones["nota-add"]({ c: t.dataset.nuevanota }).catch(e => toast(e.message)); }
+  const c = t.dataset && (t.dataset.nota ?? t.dataset.titulo ?? t.dataset.coment);
+  if (c !== undefined) { ev.preventDefault(); if (t.closest("#cursosCal")) agregarCal(Number(c)); else agregarBorrador(Number(c)); }
 });
 let tBusqueda;
 document.addEventListener("input", ev => {
   const t = ev.target;
-  if (t.id === "flt") { filtro = t.value; const p = t.selectionStart; $("#main").innerHTML = vLista(); const f = $("#flt"); f.focus(); f.setSelectionRange(p, p); }
+  if (t.id === "calCodigo") { const e = calEstudiante(); if ((e ? e.id : null) !== calEstId) repintarCal(); }
+  else if (t.id === "flt") { filtro = t.value; const p = t.selectionStart; $("#main").innerHTML = vLista(); const f = $("#flt"); f.focus(); f.setSelectionRange(p, p); }
   else if (t.id === "qInst") {
     clearTimeout(tBusqueda); instSel = null;
     tBusqueda = setTimeout(async () => {
@@ -840,7 +901,7 @@ document.addEventListener("change", ev => {
   if (t.id === "ord") { orden = +t.value; $("#main").innerHTML = vLista(); }
   else if (t.id === "invRol" || t.id === "invInst") actualizarFormInvitar();
   else if (t.id === "perSel") { periodoSel = t.value ? Number(t.value) : null; render(); if (detalleId) renderDetalle(); }
-  else if (t.id === "perAdd") perAddSel = Number(t.value);
+  else if (t.id === "perCal") repintarCal();
 });
 
 /* ===== Formularios ===== */
@@ -869,16 +930,17 @@ document.addEventListener("submit", ev => {
       if (buscarPorCodigo(codigo)) falla("Ya existe un estudiante con ese código.");
       if (!nombreValido(nombre)) falla("El nombre no puede estar vacío ni contener números o '|'.");
       await rpc("registrar_estudiante", { p_codigo: codigo, p_nombre: nombre, p_docente: d.docente || null,
-        p_notas: borrador.map(n => ({ curso: n.curso, periodo: n.periodo, nota: n.v, peso: n.peso })) });
+        p_notas: borrador.map(n => ({ curso: n.curso, periodo: n.periodo, nota: n.v, peso: n.peso, titulo: n.titulo, comentario: n.comentario })) });
       await recargarEst(); toast("Estudiante registrado y guardado."); vista = "lista"; render();
-    } else if (f.id === "fCal") {
-      const e = buscarPorCodigo(d.codigo); if (!e) falla("No se encontró ningún estudiante con ese código.");
+    } else if (f.id === "fNota") {
       const v = convertirDouble(d.nota); if (!notaValida(v)) falla(`La calificación debe ser un número entre ${NOTA_MIN} y ${NOTA_MAX}.`);
-      const c = Number(d.curso), per = Number(d.periodo);
-      if (!c || !per) falla("Primero agrega cursos y periodos en «Cursos y " + nomPeriodos(yo.institucion.tipo) + "».");
-      await rpc("agregar_nota", { p_estudiante: e.id, p_curso: c, p_periodo: per, p_nota: v, p_peso: d.peso ? Number(d.peso) : 1 }); await recargarEst();
-      const act = est.find(x => x.id === e.id); f.nota.value = "";
-      toast(`Calificación agregada. Promedio en ${cursoDe(c).nombre} (${periodoDe(per).nombre}): ${fmt(act.promedioCurso(c, per))} | General: ${fmt(act.promedio(per))}`);
+      const peso = d.peso ? Number(d.peso) : (f.dataset.id ? null : 1), titulo = (d.titulo || "").trim() || null, comentario = (d.comentario || "").trim() || null;
+      if (f.dataset.id) await rpc("actualizar_nota", { p_id: Number(f.dataset.id), p_nota: v, p_peso: peso, p_titulo: titulo, p_comentario: comentario });
+      else {
+        if (!d.periodo) falla("Elige el periodo de la nota.");
+        await rpc("agregar_nota", { p_estudiante: detalleId, p_curso: Number(f.dataset.curso), p_periodo: Number(d.periodo), p_nota: v, p_peso: peso, p_titulo: titulo, p_comentario: comentario });
+      }
+      await recargarEst(); renderDetalle(); render(); toast("Calificación guardada.");
     } else if (f.id === "fBus") {
       const e = buscarPorCodigo(d.codigo);
       $("#res").innerHTML = e ? filas([e], { acciones: true }) + detalleTabla(e) : `<div class="empty">No se encontró ningún estudiante con ese código.</div>`;
@@ -915,7 +977,7 @@ document.addEventListener("submit", ev => {
 // El formulario de invitar se rellena según el rol elegido
 new MutationObserver(() => { if ($("#fInv")) actualizarFormInvitar(); }).observe($("#root"), { childList: true });
 
-/* ===== CSV (una fila por nota: codigo,nombre,periodo,curso,nota,peso) ===== */
+/* ===== CSV (una fila por nota: codigo,nombre,periodo,curso,nota,peso,titulo,comentario) ===== */
 function filaCSV(linea, sep) {
   const r = []; let c = "", q = false;
   for (let i = 0; i < linea.length; i++) {
@@ -943,7 +1005,8 @@ function desdeCSV(texto) {
     const per = ps.find(p => p.nombre.toLowerCase() === f[2].toLowerCase()), cu = cs.find(c => c.nombre.toLowerCase() === f[3].toLowerCase());
     const nota = convertirDouble((f[4] || "").replace(",", ".")), peso = f[5] ? Number(f[5]) : 1;
     if (!per || !cu || !notaValida(nota) || !Number.isInteger(peso) || peso < 1 || peso > 10) { r.ok = false; continue; }
-    r.notas.push({ curso: cu.id, periodo: per.id, nota, peso });
+    if ((f[6] || "").length > 60 || (f[7] || "").length > 500) { r.ok = false; continue; }
+    r.notas.push({ curso: cu.id, periodo: per.id, nota, peso, titulo: f[6] || "", comentario: f[7] || "" });
   }
   for (const r of porCodigo.values()) {
     const maxPor = Math.max(0, ...Object.values(r.notas.reduce((m, n) => { const k = n.curso + "-" + n.periodo; m[k] = (m[k] || 0) + 1; return m; }, {})));
