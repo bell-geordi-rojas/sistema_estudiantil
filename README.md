@@ -11,6 +11,11 @@ Cursos: Matemática, Ciencia y Tecnología, Ciencias Sociales, Desarrollo Person
 - **Aislamiento:** cada cuenta ve solo su institución; un docente solo sus alumnos; un alumno solo a los compañeros del mismo docente. Lo aplica la base de datos (Row Level Security), no solo la página.
 - **Carpetas:** `Admin / <Institución> / Docentes / <docente> / Alumnos / <alumno>` (vista `carpetas` en la base y panel «Carpetas» del dueño).
 - **Modo claro / oscuro** y edición de datos y notas de los estudiantes.
+- **Colegio o universidad:** el dueño elige el tipo al crear la institución. Los colegios trabajan por **trimestres**; las universidades por **ciclos** y pueden dar un **peso** (1–4) a cada nota; el promedio del curso es ponderado (`Σ nota × peso / Σ peso`) y sin peso elegido vale 1.
+- **Trimestres / ciclos:** las notas se registran dentro de un periodo y se pueden filtrar por periodo. El administrador agrega, renombra o quita periodos.
+- **Cursos propios:** los colegios empiezan con 7 cursos y el administrador (o un docente con el permiso «gestionar_cursos») puede agregar, renombrar o quitar cursos. Las universidades empiezan sin cursos.
+- **Dueño:** puede **eliminar instituciones** (pide escribir su nombre; borra cuentas, estudiantes y notas) y **pausar todo el sistema** por mantenimiento (solo el dueño puede entrar mientras tanto).
+- **CSV:** una fila por nota: `codigo,nombre,periodo,curso,nota,peso`.
 
 ## Archivos
 
