@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sistema de Gestión de Estudiantes</title>
+<style>
+:root{
+  --teal:#0e9aa7; --teal-d:#0b7f8a; --bg:#f3f5f9; --card:#fff; --ink:#1f2937; --mute:#7b8494;
+  --line:#e8ebf1; --violet:#8b3df0; --violet-l:#e6d9fb; --blue:#1f6feb; --green:#10b981; --red:#ef4444; --side:#f7f8fc;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
+header{background:var(--teal);color:#fff;height:56px;display:flex;align-items:center;padding:0 20px;gap:16px}
+.logo{font-weight:800;font-size:20px;letter-spacing:.5px;display:flex;align-items:center;gap:8px}
+.logo i{width:28px;height:28px;border-radius:50%;background:#fff;display:inline-block;position:relative}
+.logo i::after{content:"";position:absolute;inset:7px;border-radius:50%;background:var(--blue)}
+header h1{font-size:15px;font-weight:500;margin:0 0 0 14px;flex:1}
+.user{display:flex;align-items:center;gap:8px;font-size:13px}
+.av{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:700;font-size:12px;flex:none}
+.layout{display:grid;grid-template-columns:210px 1fr;min-height:calc(100vh - 56px)}
+nav{background:var(--side);border-right:1px solid var(--line);padding:14px 10px}
+nav button{display:flex;width:100%;gap:10px;align-items:center;border:0;background:none;padding:10px 12px;border-radius:8px;font:inherit;color:#374151;cursor:pointer;text-align:left;margin-bottom:2px}
+nav button:hover{background:#eceffa}
+nav button.on{background:var(--violet-l);color:#4c1d95;font-weight:600}
+main{padding:20px 24px;min-width:0}
+.bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center}
+.chip{background:#fff;border:1px solid var(--line);padding:7px 14px;border-radius:8px;font-size:13px}
+.chip.on{background:#e9eefc;border-color:#c9d6fa}
+.grid{display:grid;grid-template-columns:2fr 1fr;gap:16px}
+.card{background:var(--card);border-radius:10px;box-shadow:0 1px 3px rgba(20,30,60,.07);padding:16px;margin-bottom:16px}
+.card h2{font-size:15px;margin:0 0 12px;display:flex;justify-content:space-between;align-items:center}
+table{width:100%;border-collapse:collapse}
+th{font-size:12px;color:var(--mute);font-weight:600;text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:9px 8px;border-bottom:1px solid #f0f2f6;vertical-align:middle}
+tr:last-child td{border-bottom:0}
+.who{display:flex;align-items:center;gap:10px}
+.who small{display:block;color:var(--mute);font-size:11px}
+.pill{display:inline-block;min-width:54px;text-align:center;padding:3px 10px;border-radius:6px;font-size:12px;font-weight:600;color:#fff}
+.ok{background:var(--green)}.no{background:var(--red)}.na{background:#9ca3af}
+.note{display:inline-block;background:var(--violet-l);color:#5b21b6;border-radius:5px;padding:2px 7px;font-size:12px;margin:1px}
+.btn{background:var(--teal);color:#fff;border:0;border-radius:7px;padding:8px 16px;font:inherit;cursor:pointer;font-weight:600}
+.btn:hover{background:var(--teal-d)}
+.btn.sec{background:#fff;color:#374151;border:1px solid var(--line)}
+.btn.del{background:#fff;color:var(--red);border:1px solid #fbd0d0;padding:4px 10px;font-size:12px}
+input,select{font:inherit;padding:8px 10px;border:1px solid #d6dbe6;border-radius:7px;background:#fff;min-width:0}
+input:focus,select:focus{outline:2px solid #9ddde3;border-color:var(--teal)}
+.form{display:grid;gap:12px;max-width:460px}
+.form label{display:grid;gap:4px;font-weight:600;font-size:13px}
+.form.wide{max-width:980px}
+.datos{display:grid;grid-template-columns:1fr 2fr;gap:12px}
+.cursos{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.curso{border:1px solid var(--line);border-radius:10px;padding:12px;background:#fbfcfe;display:grid;gap:8px;align-content:start;transition:.15s}
+.curso:focus-within{border-color:var(--teal);box-shadow:0 0 0 3px #d5f0f3}
+.curso h3{margin:0;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.curso h3 small{color:var(--mute);font-weight:500;white-space:nowrap}
+.curso .chips{display:flex;flex-wrap:wrap;gap:4px;min-height:26px;align-content:flex-start}
+.curso .chips em{color:#9ca3af;font-size:12px;font-style:normal;padding:3px 0}
+.curso .chips .note{cursor:pointer}
+.curso .chips .note:hover{background:#fbd0d0;color:#991b1b;text-decoration:line-through}
+.curso .add{display:flex;gap:6px}
+.curso .add input{flex:1}
+.curso .add button{padding:6px 12px}
+.err{color:var(--red);font-size:13px;min-height:18px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.kpi{background:#fff;border-radius:10px;padding:14px;box-shadow:0 1px 3px rgba(20,30,60,.07)}
+.kpi b{display:block;font-size:26px;margin-top:4px}
+.kpi span{color:var(--mute);font-size:12px}
+.legend{display:flex;gap:14px;justify-content:center;font-size:12px;color:var(--mute);margin-top:8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px}
+.toast{position:fixed;bottom:20px;right:20px;background:#111827;color:#fff;padding:10px 16px;border-radius:8px;opacity:0;transition:.25s;pointer-events:none}
+.toast.show{opacity:1}
+.empty{color:var(--mute);padding:20px;text-align:center}
+@media(max-width:900px){.layout{grid-template-columns:1fr}nav{display:flex;overflow:auto;border-right:0;border-bottom:1px solid var(--line)}nav button{white-space:nowrap;width:auto}.grid{grid-template-columns:1fr}.kpis{grid-template-columns:1fr 1fr}header h1{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo" style="flex:1"><i></i>ESTUDIANTE</div>
+  <div class="user"><span>Administrador</span><div class="av" style="background:#e08a5c">AD</div></div>
+</header>
+<div class="layout">
+  <nav id="nav"></nav>
+  <main id="main"></main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ===== Constantes (igual que en el .cpp) ===== */
+const NOTA_MIN = 0, NOTA_MAX = 20, NOTA_APROBACION = 11; // escala 0-20 (Perú), notas por curso
+const CURSOS = ["Matematica", "Ciencia y Tecnologia", "Ciencias Sociales", "Desarrollo Personal, Ciudadania y Civica", "Comunicacion", "Arte", "Ingles"];
+const ABREV = ["Mat.", "C. y T.", "C. Soc.", "DPCC", "Com.", "Arte", "Ing."];
+const NUM_CURSOS = CURSOS.length;
+const MAX_NOTAS = 20;
+
+/* ===== Modelo ===== */
+const media = v => v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
+class Estudiante {
+  // notas: arreglo con un arreglo de notas por curso (mismo orden que CURSOS)
+  constructor(codigo, nombre, notas = null) {
+    this.codigo = codigo; this.nombre = nombre;
+    this.notas = notas || Array.from({ length: NUM_CURSOS }, () => []);
+  }
+  totalNotas() { return this.notas.reduce((t, v) => t + v.length, 0); }
+  promedioCurso(c) { return media(this.notas[c]); }
+  // Promedio general: media de los promedios de los cursos que tienen notas
+  promedio() { const cs = this.notas.filter(v => v.length); return cs.length ? media(cs.map(media)) : 0; }
+  aprobado() { return this.totalNotas() > 0 && this.promedio() >= NOTA_APROBACION; }
+  estado() { return !this.totalNotas() ? "Sin notas" : this.aprobado() ? "Aprobado" : "Reprobado"; }
+}
+let estudiantes = [];
+
+/* ===== Validaciones ===== */
+const convertirDouble = t => { t = t.trim(); return t !== "" && !isNaN(Number(t)) ? Number(t) : null; };
+const nombreValido = n => n !== "" && !n.includes("|") && !/\d/.test(n);
+const codigoValido = c => c !== "" && c.length <= 15 && /^[A-Za-z0-9]+$/.test(c);
+const notaValida = v => v !== null && v >= NOTA_MIN && v <= NOTA_MAX;
+
+/* ===== Búsqueda ===== */
+const buscarPorCodigo = codigo => estudiantes.find(e => e.codigo.toUpperCase() === codigo.trim().toUpperCase()) || null;
+
+/* ===== Servidor (api.php + MySQL) ===== */
+/* Web publicada: rellena estos dos valores (Supabase > Project Settings > API) y los datos se guardan en la nube.
+   Si se dejan vacíos, la página usa api.php + MySQL (XAMPP local). */
+const SUPABASE_URL = "https://tikpnokwqkofitguvpdx.supabase.co";
+const SUPABASE_KEY = "sb_publishable_jJgmXkQMlB2UH-E70KOvYg_sjQz-xwH"; // clave pública (publishable/anon): es pública por diseño
+const API = "api.php";
+let aviso = ""; // mensaje fijo cuando no hay conexión con el servidor
+
+async function apiSupabase(accion, datos) {
+  const cab = { apikey: SUPABASE_KEY, "Content-Type": "application/json" };
+  if (!SUPABASE_KEY.startsWith("sb_")) cab.Authorization = `Bearer ${SUPABASE_KEY}`; // las claves sb_publishable_ no son JWT
+  const rest = `${SUPABASE_URL.replace(/\/$/, "")}/rest/v1`;
+  let url, opts = { headers: cab };
+  if (accion === "listar") url = `${rest}/estudiantes?select=id,codigo,nombre,notas(id,curso,nota)&order=id`;
+  else if (accion === "registrar") {
+    url = `${rest}/rpc/registrar_estudiante`;
+    const notas = datos.notas.split("|").map(c => c.split(";").filter(t => t.trim() !== "").map(Number));
+    opts = { method: "POST", headers: cab, body: JSON.stringify({ p_codigo: datos.codigo, p_nombre: datos.nombre, p_notas: notas }) };
+  } else if (accion === "nota") {
+    url = `${rest}/rpc/agregar_nota`;
+    opts = { method: "POST", headers: cab, body: JSON.stringify({ p_codigo: datos.codigo, p_curso: +datos.curso, p_nota: +datos.nota }) };
+  } else if (accion === "eliminar") {
+    url = `${rest}/estudiantes?codigo=eq.${encodeURIComponent(datos.codigo)}`;
+    opts = { method: "DELETE", headers: { ...cab, Prefer: "return=representation" } };
+  }
+  let r;
+  try { r = await fetch(url, opts); } catch { throw new Error("No se pudo conectar con la base de datos en la nube. Revisa tu conexión a internet."); }
+  const txt = await r.text();
+  let j = null; try { j = txt ? JSON.parse(txt) : null; } catch {}
+  if (!r.ok) {
+    if (j && j.code === "23505") throw new Error("Ya existe un estudiante con ese código.");
+    if (j && j.code === "23514") throw new Error("Datos inválidos (revisa código, nombre y notas).");
+    throw new Error((j && j.message) || "Error del servidor.");
+  }
+  if (accion === "eliminar" && Array.isArray(j) && !j.length) throw new Error("No se encontró ningún estudiante con ese código.");
+  if (accion === "listar") {
+    return { estudiantes: j.map(e => ({
+      codigo: e.codigo, nombre: e.nombre,
+      notas: CURSOS.map((_, c) => e.notas.filter(n => n.curso === c).sort((a, b) => a.id - b.id).map(n => Number(n.nota))),
+    })) };
+  }
+  return { ok: true };
+}
+
+async function api(accion, datos = null) {
+  if (SUPABASE_URL && SUPABASE_KEY) return apiSupabase(accion, datos);
+  let r;
+  try {
+    r = datos ? await fetch(API, { method: "POST", body: new URLSearchParams({ accion, ...datos }) }) : await fetch(`${API}?accion=${accion}`);
+  } catch { throw new Error("No se pudo conectar con api.php. Abre esta página desde el servidor (http://localhost/sistema_estudiantes/)."); }
+  let j;
+  try { j = await r.json(); } catch { throw new Error("Respuesta inválida del servidor. ¿Están PHP y MySQL en marcha?"); }
+  if (!r.ok || j.ok === false) throw new Error(j.error || "Error del servidor.");
+  return j;
+}
+const notasATexto = notas => notas.map(v => v.join(";")).join("|"); // "n;n|n|...": un campo por curso
+
+async function cargar() {
+  try {
+    const j = await api("listar");
+    estudiantes = j.estudiantes.map(d => new Estudiante(d.codigo, d.nombre, d.notas));
+    aviso = "";
+  } catch (e) { estudiantes = []; aviso = e.message; }
+}
+
+/* Lee texto en formato codigo|nombre|notas curso 1|...|notas curso N (se usa al importar .csv) */
+function parsear(texto) {
+  const lista = []; let omitidas = 0;
+  for (const linea of texto.split("\n")) {
+    if (!linea.trim()) continue;
+    const campos = linea.split("|");
+    if (campos.length !== 2 + NUM_CURSOS) { omitidas++; continue; }
+    const e = new Estudiante(campos[0].trim(), campos[1].trim());
+    let ok = codigoValido(e.codigo) && nombreValido(e.nombre) && !lista.some(x => x.codigo.toUpperCase() === e.codigo.toUpperCase());
+    for (let c = 0; ok && c < NUM_CURSOS; c++) {
+      for (let tok of campos[2 + c].split(";")) {
+        if (!ok) break;
+        tok = tok.trim(); if (!tok) continue;
+        const v = convertirDouble(tok);
+        if (!notaValida(v)) ok = false; else e.notas[c].push(v);
+      }
+    }
+    if (ok) lista.push(e); else omitidas++;
+  }
+  return { lista, omitidas };
+}
+
+/* ===== Utilidades UI ===== */
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = n => n.toFixed(2);
+const COLORS = ["#e08a5c", "#8b3df0", "#0e9aa7", "#1f6feb", "#10b981", "#d946ef"];
+const avatar = e => { let h = 0; for (const c of e.codigo) h += c.charCodeAt(0);
+  const ini = e.nombre.split(/\s+/).slice(0, 2).map(w => w[0]).join("").toUpperCase();
+  return `<div class="av" style="background:${COLORS[h % COLORS.length]}">${esc(ini)}</div>`; };
+let tt; function toast(m) { const t = $("#toast"); t.textContent = m; t.classList.add("show"); clearTimeout(tt); tt = setTimeout(() => t.classList.remove("show"), 2600); }
+const pill = e => `<span class="pill ${e.totalNotas() ? (e.aprobado() ? "ok" : "no") : "na"}">${e.estado()}</span>`;
+
+function stats() {
+  let aprobados = 0, conNotas = 0, suma = 0;
+  for (const e of estudiantes) { if (!e.totalNotas()) continue; conNotas++; suma += e.promedio(); if (e.aprobado()) aprobados++; }
+  const porCurso = CURSOS.map((_, c) => {
+    const ps = estudiantes.filter(e => e.notas[c].length).map(e => e.promedioCurso(c));
+    return ps.length ? media(ps) : null;
+  });
+  return { total: estudiantes.length, conNotas, aprobados, reprobados: conNotas - aprobados, general: conNotas ? suma / conNotas : null, porCurso };
+}
+
+/* ===== Gráficos ===== */
+function donut(a, b, ca, cb) {
+  const t = a + b, r = 52, C = 2 * Math.PI * r, pa = t ? a / t : 0;
+  return `<svg viewBox="0 0 140 140" width="150" height="150" style="display:block;margin:auto">
+    <circle cx="70" cy="70" r="${r}" fill="none" stroke="${cb}" stroke-width="24"/>
+    <circle cx="70" cy="70" r="${r}" fill="none" stroke="${ca}" stroke-width="24" stroke-dasharray="${pa * C} ${C}" transform="rotate(-90 70 70)"/>
+    <text x="70" y="75" text-anchor="middle" font-size="20" font-weight="700" fill="#1f2937">${t ? Math.round(pa * 100) : 0}%</text></svg>`;
+}
+function bars() {
+  const data = estudiantes.filter(e => e.totalNotas());
+  if (!data.length) return `<div class="empty">Sin datos</div>`;
+  const w = Math.max(280, data.length * 46), h = 170;
+  return `<svg viewBox="0 0 ${w} ${h + 22}" width="100%" style="max-height:220px">` +
+    [0, NOTA_MAX / 2, NOTA_MAX].map(v => `<line x1="0" x2="${w}" y1="${h - v * h / NOTA_MAX}" y2="${h - v * h / NOTA_MAX}" stroke="#eef0f5"/><text x="0" y="${h - v * h / NOTA_MAX - 2}" font-size="9" fill="#9ca3af">${v}</text>`).join("") +
+    data.map((e, i) => { const p = e.promedio(), bh = p * h / NOTA_MAX, x = 20 + i * 44;
+      return `<rect x="${x}" y="${h - bh}" width="26" height="${bh}" rx="3" fill="${e.aprobado() ? "#0e9aa7" : "#8b3df0"}"/>
+      <text x="${x + 13}" y="${h + 13}" font-size="9" text-anchor="middle" fill="#6b7280">${esc(e.codigo.slice(0, 6))}</text>`; }).join("") + `</svg>`;
+}
+
+/* ===== Vistas ===== */
+const VISTAS = {
+  dashboard: ["▦", "Panel principal"], lista: ["☰", "Estudiantes"], registrar: ["＋", "Registrar estudiante"],
+  calificar: ["✎", "Agregar calificación"], buscar: ["⌕", "Buscar por código"], estadisticas: ["◔", "Estadísticas"],
+};
+let vista = "dashboard", orden = 0, filtro = "";
+
+function nav() {
+  $("#nav").innerHTML = Object.entries(VISTAS).map(([k, [i, n]]) => `<button class="${k === vista ? "on" : ""}" data-v="${k}"><span>${i}</span>${n}</button>`).join("") +
+    `<hr style="border:0;border-top:1px solid var(--line);margin:10px 0">
+     <button data-act="export"><span>⇩</span>Exportar .csv</button>
+     <button data-act="import"><span>⇧</span>Importar .csv</button>`;
+}
+
+function filas(lista, acciones = true) {
+  if (!lista.length) return `<div class="empty">No hay estudiantes registrados.</div>`;
+  return `<div style="overflow-x:auto"><table><thead><tr><th>Estudiante</th><th>Notas</th>${CURSOS.map((c, i) => `<th title="${esc(c)}">${ABREV[i]}</th>`).join("")}<th>Promedio</th><th>Estado</th>${acciones ? "<th></th>" : ""}</tr></thead><tbody>` +
+    lista.map(e => `<tr><td><div class="who">${avatar(e)}<div>${esc(e.nombre)}<small>${esc(e.codigo)}</small></div></div></td>
+      <td>${e.totalNotas()}</td>${e.notas.map((v, c) => `<td>${v.length ? fmt(e.promedioCurso(c)) : "<small style='color:#9ca3af'>–</small>"}</td>`).join("")}
+      <td><b>${fmt(e.promedio())}</b></td><td>${pill(e)}</td>
+      ${acciones ? `<td><button class="btn del" data-del="${esc(e.codigo)}">Eliminar</button></td>` : ""}</tr>`).join("") + `</tbody></table></div>`;
+}
+
+/* Borrador de notas por curso mientras se registra un estudiante */
+let borrador = [];
+function cursosHTML() {
+  return CURSOS.map((c, i) => `<div class="curso"><h3>${esc(c)}<small>${borrador[i].length ? "prom. " + fmt(media(borrador[i])) : "sin notas"}</small></h3>
+    <div class="chips">${borrador[i].length ? borrador[i].map((n, j) => `<span class="note" data-rm="${i},${j}" title="Quitar">${n}</span>`).join("") : "<em>Sin notas</em>"}</div>
+    <div class="add"><input data-nota="${i}" inputmode="decimal" placeholder="Nota (0–20)" aria-label="Nueva nota de ${esc(c)}"><button type="button" class="btn" data-add="${i}">+</button></div></div>`).join("");
+}
+function repintarCursos(foco) {
+  $("#cursosReg").innerHTML = cursosHTML();
+  if (foco !== undefined) $(`[data-nota="${foco}"]`).focus();
+}
+function agregarBorrador(c) {
+  const inp = $(`[data-nota="${c}"]`), err = $("#err"), v = convertirDouble(inp.value);
+  if (!notaValida(v)) { err.textContent = `${CURSOS[c]}: la calificación debe ser un número entre ${NOTA_MIN} y ${NOTA_MAX}.`; inp.focus(); return; }
+  if (borrador[c].length >= MAX_NOTAS) { err.textContent = `${CURSOS[c]}: máximo ${MAX_NOTAS} calificaciones.`; return; }
+  err.textContent = ""; borrador[c].push(v); repintarCursos(c);
+}
+
+function detalle(e) {
+  return `<table style="margin-top:14px"><thead><tr><th>Curso</th><th>Calificaciones</th><th>Promedio</th></tr></thead><tbody>` +
+    e.notas.map((v, c) => `<tr><td>${esc(CURSOS[c])}</td><td>${v.length ? v.map(n => `<span class="note">${n}</span>`).join("") : "<small style='color:#9ca3af'>(sin notas)</small>"}</td><td>${v.length ? `<b>${fmt(e.promedioCurso(c))}</b>` : "–"}</td></tr>`).join("") + `</tbody></table>`;
+}
+
+function render() {
+  nav(); const s = stats(), m = $("#main");
+  if (aviso) { m.innerHTML = `<div class="card"><h2>Sin conexión con la base de datos</h2><p class="err">${esc(aviso)}</p><button class="btn" data-act="reintentar">Reintentar</button></div>`; return; }
+  const kpis = `<div class="kpis">
+    <div class="kpi"><span>Total de estudiantes</span><b>${s.total}</b></div>
+    <div class="kpi"><span>Con calificaciones</span><b>${s.conNotas}</b></div>
+    <div class="kpi"><span>Aprobados (≥ ${NOTA_APROBACION})</span><b style="color:var(--green)">${s.aprobados}</b></div>
+    <div class="kpi"><span>Reprobados</span><b style="color:var(--red)">${s.reprobados}</b></div></div>`;
+  const leyenda = `<div class="legend"><span><i style="background:#0e9aa7"></i>Aprobados</span><span><i style="background:#c9a8f7"></i>Reprobados</span></div>`;
+
+  if (vista === "dashboard") {
+    m.innerHTML = `<div class="bar"><span class="chip on">Registro de estudiantes</span><span class="chip">Promedio general: ${s.general === null ? "—" : fmt(s.general)}</span></div>${kpis}
+    <div class="grid"><div>
+      <div class="card"><h2>Registro de estudiantes <button class="btn" data-v="registrar">+ Nuevo</button></h2>${filas(estudiantes.slice(0, 6), false)}</div></div>
+      <div><div class="card"><h2>Aprobación</h2>${donut(s.aprobados, s.reprobados, "#0e9aa7", "#c9a8f7")}${leyenda}</div>
+      <div class="card"><h2>Promedio por estudiante</h2>${bars()}</div></div></div>`;
+  } else if (vista === "lista") {
+    let l = [...estudiantes].filter(e => (e.nombre + e.codigo).toLowerCase().includes(filtro.toLowerCase()));
+    if (orden) l.sort((a, b) => orden === 1 ? b.promedio() - a.promedio() : a.promedio() - b.promedio());
+    m.innerHTML = `<div class="card"><h2>Lista de estudiantes</h2><div class="bar">
+      <input id="flt" placeholder="Filtrar por nombre o código" value="${esc(filtro)}">
+      <select id="ord"><option value="0">Orden de registro</option><option value="1" ${orden === 1 ? "selected" : ""}>Promedio: mayor a menor</option><option value="2" ${orden === 2 ? "selected" : ""}>Promedio: menor a mayor</option></select></div>${filas(l)}</div>`;
+  } else if (vista === "registrar") {
+    borrador = Array.from({ length: NUM_CURSOS }, () => []);
+    m.innerHTML = `<div class="card"><h2>Registrar estudiante</h2><form class="form wide" id="fReg">
+      <div class="datos">
+        <label>Código (letras/números, máx. 15)<input name="codigo" required></label>
+        <label>Nombre completo<input name="nombre" required></label>
+      </div>
+      <div style="font-weight:600;font-size:13px">Notas por curso <span style="color:var(--mute);font-weight:400">(opcional · escribe una nota de 0 a 20 y pulsa Enter o +; toca una nota para quitarla)</span></div>
+      <div class="cursos" id="cursosReg">${cursosHTML()}</div>
+      <div class="err" id="err"></div><div><button class="btn">Registrar y guardar</button></div></form></div>`;
+  } else if (vista === "calificar") {
+    m.innerHTML = `<div class="card"><h2>Agregar calificación</h2><form class="form" id="fCal">
+      <label>Código del estudiante<input name="codigo" list="cods" required></label>
+      <datalist id="cods">${estudiantes.map(e => `<option value="${esc(e.codigo)}">${esc(e.nombre)}</option>`).join("")}</datalist>
+      <label>Curso<select name="curso">${CURSOS.map((c, i) => `<option value="${i}">${esc(c)}</option>`).join("")}</select></label>
+      <label>Nueva calificación<input name="nota" required></label>
+      <div class="err" id="err"></div><div><button class="btn">Agregar</button></div></form></div>`;
+  } else if (vista === "buscar") {
+    m.innerHTML = `<div class="card"><h2>Buscar por código</h2><form class="bar" id="fBus"><input name="codigo" placeholder="Código" required><button class="btn">Buscar</button></form><div id="res"></div></div>`;
+  } else if (vista === "estadisticas") {
+    m.innerHTML = `${kpis}<div class="grid"><div class="card"><h2>Resumen</h2>
+      <p>Total de estudiantes: <b>${s.total}</b><br>Con calificaciones: <b>${s.conNotas}</b><br>Aprobados (&ge; ${NOTA_APROBACION}): <b>${s.aprobados}</b><br>Reprobados: <b>${s.reprobados}</b><br>Promedio general: <b>${s.general === null ? "—" : fmt(s.general)}</b></p>
+      ${s.total ? "" : "<div class='empty'>No hay estudiantes registrados.</div>"}${bars()}</div>
+      <div><div class="card"><h2>Aprobación</h2>${donut(s.aprobados, s.reprobados, "#0e9aa7", "#c9a8f7")}${leyenda}</div>
+      <div class="card"><h2>Promedio por curso</h2><table><tbody>${CURSOS.map((c, i) => `<tr><td>${esc(c)}</td><td><b>${s.porCurso[i] === null ? "(sin notas)" : fmt(s.porCurso[i])}</b></td></tr>`).join("")}</tbody></table></div></div></div>`;
+  }
+}
+
+/* ===== CSV (codigo,nombre y una columna por curso con las notas separadas por ';') ===== */
+const campoCSV = s => /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+function aCSV() {
+  return ["codigo", "nombre", ...CURSOS].map(campoCSV).join(",") + "\r\n" +
+    estudiantes.map(e => [e.codigo, e.nombre, ...e.notas.map(v => v.join(";"))].map(campoCSV).join(",")).join("\r\n") + "\r\n";
+}
+function filaCSV(linea, sep) {
+  const r = []; let c = "", q = false;
+  for (let i = 0; i < linea.length; i++) {
+    const ch = linea[i];
+    if (q) { if (ch === '"') { if (linea[i + 1] === '"') { c += '"'; i++; } else q = false; } else c += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === sep) { r.push(c); c = ""; }
+    else c += ch;
+  }
+  r.push(c); return r;
+}
+function desdeCSV(texto) {
+  const lineas = texto.replace(/^﻿/, "").split(/\r?\n/).filter(l => l.trim());
+  if (!lineas.length) return { lista: [], omitidas: 0 };
+  const sep = lineas[0].includes(",") ? "," : ";";
+  let omitidas = 0; const pipe = [];
+  for (const l of lineas.slice(/^codigo/i.test(lineas[0].trim()) ? 1 : 0)) {
+    const f = filaCSV(l, sep);
+    if (f.length < 2) { omitidas++; continue; }
+    const cols = CURSOS.map((_, c) => (f[2 + c] || "").replace(/[\s,|]+/g, ";"));
+    pipe.push(`${f[0].replace(/\|/g, "")}|${f[1].replace(/\|/g, "")}|${cols.join("|")}`);
+  }
+  const r = parsear(pipe.join("\n"));
+  r.omitidas += omitidas;
+  return r;
+}
+
+/* ===== Eventos ===== */
+document.addEventListener("click", ev => {
+  const b = ev.target.closest("[data-v],[data-del],[data-act]"); if (!b) return;
+  if (b.dataset.v) { vista = b.dataset.v; render(); }
+  else if (b.dataset.del) {
+    const e = buscarPorCodigo(b.dataset.del);
+    if (e && confirm(`¿Eliminar a '${e.nombre}'?`)) {
+      api("eliminar", { codigo: e.codigo }).then(cargar).then(() => { toast("Estudiante eliminado."); render(); }).catch(err => toast(err.message));
+    }
+  } else if (b.dataset.act === "reintentar") {
+    cargar().then(render);
+  } else if (b.dataset.act === "export") {
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + aCSV()], { type: "text/csv;charset=utf-8" })); a.download = "estudiantes.csv"; a.click();
+  } else if (b.dataset.act === "import") {
+    const i = document.createElement("input"); i.type = "file"; i.accept = ".csv";
+    i.onchange = async () => {
+      const { lista, omitidas } = desdeCSV(await i.files[0].text());
+      let nuevos = 0, rechazados = 0;
+      for (const e of lista) {
+        try { await api("registrar", { codigo: e.codigo, nombre: e.nombre, notas: notasATexto(e.notas) }); nuevos++; } catch { rechazados++; }
+      }
+      await cargar();
+      toast(`Se importaron ${nuevos} registro(s).` + (omitidas + rechazados ? ` ${omitidas + rechazados} omitida(s) (inválidas o ya existentes).` : ""));
+      render();
+    };
+    i.click();
+  }
+});
+document.addEventListener("click", ev => {
+  const a = ev.target.closest("[data-add],[data-rm]"); if (!a) return;
+  if (a.dataset.add !== undefined) agregarBorrador(+a.dataset.add);
+  else { const [c, j] = a.dataset.rm.split(",").map(Number); borrador[c].splice(j, 1); repintarCursos(); }
+});
+document.addEventListener("keydown", ev => {
+  if (ev.key === "Enter" && ev.target.dataset && ev.target.dataset.nota !== undefined) { ev.preventDefault(); agregarBorrador(+ev.target.dataset.nota); }
+});
+document.addEventListener("input", ev => {
+  if (ev.target.id === "flt") { filtro = ev.target.value; const p = ev.target.selectionStart; render(); const f = $("#flt"); f.focus(); f.setSelectionRange(p, p); }
+});
+document.addEventListener("change", ev => { if (ev.target.id === "ord") { orden = +ev.target.value; render(); } });
+document.addEventListener("submit", async ev => {
+  ev.preventDefault(); const f = ev.target, d = Object.fromEntries(new FormData(f)), err = $("#err");
+  const fail = m => { err.textContent = m; };
+  if (f.id === "fReg") {
+    const codigo = d.codigo.trim(), nombre = d.nombre.trim();
+    if (!codigoValido(codigo)) return fail("Código inválido (solo letras/números, máx. 15).");
+    if (buscarPorCodigo(codigo)) return fail("Ya existe un estudiante con ese código.");
+    if (!nombreValido(nombre)) return fail("El nombre no puede estar vacío ni contener números o '|'.");
+    try { await api("registrar", { codigo, nombre, notas: notasATexto(borrador) }); } catch (e) { return fail(e.message); }
+    await cargar(); toast("Estudiante registrado y guardado."); vista = "lista"; render();
+  } else if (f.id === "fCal") {
+    const e = buscarPorCodigo(d.codigo); if (!e) return fail("No se encontró ningún estudiante con ese código.");
+    const v = convertirDouble(d.nota); if (!notaValida(v)) return fail(`La calificación debe ser un número entre ${NOTA_MIN} y ${NOTA_MAX}.`);
+    const c = +d.curso;
+    try { await api("nota", { codigo: e.codigo, curso: c, nota: v }); } catch (er) { return fail(er.message); }
+    await cargar(); const act = buscarPorCodigo(e.codigo);
+    toast(`Calificación agregada. Promedio en ${CURSOS[c]}: ${fmt(act.promedioCurso(c))} | General: ${fmt(act.promedio())}`); render();
+  } else if (f.id === "fBus") {
+    const e = buscarPorCodigo(d.codigo);
+    $("#res").innerHTML = e ? filas([e], false) + detalle(e) :`<div class="empty">No se encontró ningún estudiante con ese código.</div>`;
+  }
+});
+
+render(); cargar().then(render);
+</script>
+</body>
+</html>
