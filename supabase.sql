@@ -98,23 +98,35 @@ create table if not exists cursos (
 );
 create unique index if not exists cursos_nombre_unico on cursos (institucion_id, lower(nombre));
 
+-- Las universidades tienen 14 ciclos fijos (Ciclo I ... Ciclo XIV); agrega los que falten
+create or replace function _asegurar_ciclos(p_inst bigint) returns void language plpgsql security definer set search_path = public as $$
+declare r text[] := array['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII', 'XIV']; i int;
+begin
+  for i in 1..14 loop
+    insert into periodos (institucion_id, nombre, orden) values (p_inst, 'Ciclo ' || r[i], i) on conflict do nothing;
+  end loop;
+end $$;
+
 -- Periodos y cursos iniciales de una institucion (solo si aun no tiene)
 create or replace function _sembrar_institucion(p_inst bigint) returns void language plpgsql security definer set search_path = public as $$
 declare v_tipo text;
 begin
   select tipo into v_tipo from instituciones where id = p_inst;
-  if not exists (select 1 from periodos where institucion_id = p_inst) then
-    if v_tipo = 'universidad' then
-      insert into periodos (institucion_id, nombre, orden) values (p_inst, 'Ciclo I', 1), (p_inst, 'Ciclo II', 2);
-    else
-      insert into periodos (institucion_id, nombre, orden) values (p_inst, 'Trimestre 1', 1), (p_inst, 'Trimestre 2', 2), (p_inst, 'Trimestre 3', 3);
-    end if;
+  if v_tipo = 'universidad' then
+    perform _asegurar_ciclos(p_inst);
+  elsif not exists (select 1 from periodos where institucion_id = p_inst) then
+    insert into periodos (institucion_id, nombre, orden) values (p_inst, 'Trimestre 1', 1), (p_inst, 'Trimestre 2', 2), (p_inst, 'Trimestre 3', 3);
   end if;
   if v_tipo = 'colegio' and not exists (select 1 from cursos where institucion_id = p_inst) then
     insert into cursos (institucion_id, nombre, orden)
       select p_inst, c.n, c.o from unnest(array['Matematica', 'Ciencia y Tecnologia', 'Ciencias Sociales',
         'Desarrollo Personal, Ciudadania y Civica', 'Comunicacion', 'Arte', 'Ingles']) with ordinality as c(n, o);
   end if;
+end $$;
+
+-- Universidades ya existentes: completar sus 14 ciclos
+do $$ declare i record; begin
+  for i in select id from instituciones where tipo = 'universidad' loop perform _asegurar_ciclos(i.id); end loop;
 end $$;
 
 create table if not exists notas (
@@ -610,6 +622,7 @@ begin
   if p_tipo not in ('colegio', 'universidad') then raise exception 'Tipo de institucion invalido.'; end if;
   update instituciones set tipo = p_tipo where id = p_id;
   if not found then raise exception 'Institucion no encontrada.'; end if;
+  if p_tipo = 'universidad' then perform _asegurar_ciclos(p_id); end if;
   if p_tipo = 'colegio' then
     update notas set peso = 1 where peso <> 1 and estudiante_id in (select id from estudiantes where institucion_id = p_id);
   end if;
@@ -684,6 +697,7 @@ language plpgsql security definer set search_path = public as $$
 declare v_id bigint; v_inst bigint := mi_inst();
 begin
   if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
+  if (select tipo from instituciones where id = v_inst) = 'universidad' then raise exception 'Las universidades tienen 14 ciclos fijos.'; end if;
   p_nombre := trim(coalesce(p_nombre, ''));
   if p_nombre = '' or length(p_nombre) > 40 then raise exception 'Escribe el nombre (maximo 40 caracteres).'; end if;
   if exists (select 1 from periodos where institucion_id = v_inst and lower(nombre) = lower(p_nombre)) then raise exception 'Ya existe uno con ese nombre.'; end if;
@@ -697,6 +711,7 @@ create or replace function renombrar_periodo(p_id bigint, p_nombre text) returns
 language plpgsql security definer set search_path = public as $$
 begin
   if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
+  if (select tipo from instituciones where id = mi_inst()) = 'universidad' then raise exception 'Las universidades tienen 14 ciclos fijos.'; end if;
   p_nombre := trim(coalesce(p_nombre, ''));
   if p_nombre = '' or length(p_nombre) > 40 then raise exception 'Escribe el nombre (maximo 40 caracteres).'; end if;
   if exists (select 1 from periodos where institucion_id = mi_inst() and lower(nombre) = lower(p_nombre) and id <> p_id) then raise exception 'Ya existe uno con ese nombre.'; end if;
@@ -709,6 +724,7 @@ create or replace function eliminar_periodo(p_id bigint) returns void
 language plpgsql security definer set search_path = public as $$
 begin
   if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
+  if (select tipo from instituciones where id = mi_inst()) = 'universidad' then raise exception 'Las universidades tienen 14 ciclos fijos.'; end if;
   if (select count(*) from periodos where institucion_id = mi_inst()) <= 1 then raise exception 'Debe quedar al menos un periodo.'; end if;
   delete from periodos where id = p_id and institucion_id = mi_inst();
   if not found then raise exception 'No encontrado.'; end if;
@@ -897,7 +913,7 @@ begin
   for f in select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname = any (array[
              '_generar_usuario', '_crear_invitacion', '_puede_resolver_solicitud', '_puede_invitacion', '_puedo_gestionar', '_alcance_perfil', 'crear_invitacion_dueno',
-             '_sembrar_institucion', '_puede_cursos', '_guardar_comentario'])
+             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario'])
   loop
     execute format('revoke all on function %s from public, anon, authenticated', f);
   end loop;
