@@ -26,6 +26,13 @@ Cursos: Matemática, Ciencia y Tecnología, Ciencias Sociales, Desarrollo Person
 | `supabase.sql` | Crea todo en Supabase (tablas, seguridad, funciones). Se puede ejecutar más de una vez. |
 | `api.php`, `sistema_estudiantes.cpp` | Versión local antigua (XAMPP/consola) de una sola institución, sin cuentas. Ya no se usa con la web. |
 
+## Programas para PC y Android
+
+Dentro de la web, en **Descargar sistema** (o en la pestaña «Descargar» del login) hay un instalador para Windows (`Estudiantil-Setup.exe`) y un APK para Android (`Estudiantil.apk`).
+Son ventanas que abren la web publicada (mismas cuentas, mismos datos y siempre la última versión), con el logo de Master's Corporation. Necesitan internet.
+Los compila GitHub Actions (`.github/workflows/build-apps.yml`, código en `app/`) y los publica en la versión **app-latest**; se recompilan al cambiar `app/` o a mano en *Actions → Compilar programas → Run workflow*.
+El instalador de Windows no tiene firma digital (SmartScreen avisa) y el APK está firmado con clave de depuración (hay que permitir «instalar apps desconocidas»).
+
 ## Puesta en marcha (una sola vez)
 
 1. En Supabase: **Authentication → Sign In / Providers → Email → desactivar «Confirm email»** (las cuentas usan un correo interno).
