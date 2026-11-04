@@ -1505,7 +1505,18 @@ const acciones = {
   "curso-menu"(d) { const m = $(`#cm${d.id}`); const abrir = !m.classList.contains("open"); document.querySelectorAll(".cmenu.open").forEach(x => x.classList.remove("open")); if (abrir) m.classList.add("open"); },
   "curso-fav"(d) { const id = idNum(d), f = new Set(favoritos()); f.has(id) ? f.delete(id) : f.add(id); guardarLocal("fav_" + yo.id, JSON.stringify([...f])); render(); },
   "curso-ver"(d) { const c = cursoDe(idNum(d)); if (!c) return; abrirCompartido(`.ccard[data-id="${c.id}"] .banw`, "banner-curso", htmlCurso(c, "notas")); },
-  "curso-tab"(d) { const c = cursoDe(Number(d.c)); if (c) $("#dlgBody").innerHTML = htmlCurso(c, d.id); },  efectos() { const on = !efectosActivos(); document.documentElement.dataset.efectos = on ? "on" : "off"; guardarLocal("efectos", on ? "on" : "off"); render(); toast(on ? "Efectos visuales activados." : "Efectos visuales desactivados."); },
+  async "curso-tab"(d) {
+    const c = cursoDe(Number(d.c)); if (!c) return;
+    $("#dlgBody").innerHTML = htmlCurso(c, d.id);
+    if (d.id !== "personas") return;
+    try {   // datos frescos: el docente o los compañeros pudieron agregarse después de abrir la sesión
+      const [dc, ins, pe, e] = await Promise.all([sel("docente_cursos?select=docente_id,curso_id"), selTodo("inscripciones?select=estudiante_id,curso_id&order=estudiante_id,curso_id"),
+        sel("perfiles?select=id,usuario,nombres,apellidos,rol,institucion_id,docente_id,permisos,activo&order=creado"), sel(SEL_EST)]);
+      docCursos = dc; inscr = ins; inscrSet = new Set(ins.map(x => x.estudiante_id + "-" + x.curso_id)); perfiles = pe; est = e.map(x => new Estudiante(x));
+      const activa = $("#dlgBody .tabs button.on");
+      if (dlg.open && activa && activa.dataset.id === "personas") $("#dlgBody").innerHTML = htmlCurso(c, "personas");
+    } catch {}
+  },  efectos() { const on = !efectosActivos(); document.documentElement.dataset.efectos = on ? "on" : "off"; guardarLocal("efectos", on ? "on" : "off"); render(); toast(on ? "Efectos visuales activados." : "Efectos visuales desactivados."); },
   async "correo-copiar-script"() { await copiar(SCRIPT_CORREO); },
   "correo-generar"() { const c = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789", b = crypto.getRandomValues(new Uint8Array(28)); $("#correoSecreto").value = [...b].map(x => c[x % c.length]).join(""); toast("Clave generada: cópiala en la propiedad SECRETO del script."); },
   async "correo-copiar-clave"() { const v = $("#correoSecreto").value; if (v) await copiar(v); else toast("Primero genera o escribe la clave."); },
