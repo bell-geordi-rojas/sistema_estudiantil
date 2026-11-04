@@ -1,5 +1,5 @@
 {
-  "requerida": "1.6.0",
+  "requerida": "1.7.0",
   "android": "https://github.com/bell786u-ctrl/sistema_estudiantil/releases/download/app-latest/SINEVA.apk",
   "pc": "https://github.com/bell786u-ctrl/sistema_estudiantil/releases/download/app-latest/SINEVA-Setup.exe"
 }
