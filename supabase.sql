@@ -770,13 +770,29 @@ begin
   insert into solicitudes (institucion_id, nombres, apellidos, rol_solicitado) values (p_institucion, p_nombres, p_apellidos, p_rol);
 end $$;
 
+create table if not exists intentos_activacion (
+  id bigint generated always as identity primary key,
+  usuario text not null,
+  creado timestamptz not null default now()
+);
+create index if not exists intentos_activacion_u on intentos_activacion (usuario, creado desc);
+alter table intentos_activacion enable row level security;
+
+drop function if exists verificar_activacion(text, text);
 create or replace function verificar_activacion(p_usuario text, p_codigo text) returns jsonb
-language plpgsql stable security definer set search_path = public, extensions as $$
-declare inv invitaciones;
+language plpgsql volatile security definer set search_path = public, extensions as $$
+declare inv invitaciones; v_u text := lower(left(trim(coalesce(p_usuario, '')), 60));
 begin
   if en_mantenimiento() then raise exception 'El sistema esta en mantenimiento. Intenta de nuevo mas tarde.'; end if;
-  select * into inv from invitaciones where usuario = lower(trim(coalesce(p_usuario, ''))) and not usado;
-  if not found or inv.codigo_hash <> crypt(coalesce(p_codigo, ''), inv.codigo_hash) then return null; end if;
+  delete from intentos_activacion where creado < now() - interval '1 day';
+  if (select count(*) from intentos_activacion where usuario = v_u and creado > now() - interval '15 minutes') >= 8 then
+    raise exception 'Demasiados intentos. Espera 15 minutos e intenta de nuevo.';
+  end if;
+  select * into inv from invitaciones where usuario = v_u and not usado;
+  if not found or inv.codigo_hash <> crypt(coalesce(p_codigo, ''), inv.codigo_hash) then
+    insert into intentos_activacion (usuario) values (v_u);
+    return null;
+  end if;
   return jsonb_build_object('nombres', inv.nombres, 'apellidos', inv.apellidos, 'rol', inv.rol,
     'institucion', (select nombre from instituciones where id = inv.institucion_id));
 end $$;
@@ -792,6 +808,9 @@ declare
 begin
   select valor into v_dominio from config where clave = 'email_dominio';
   if en_mantenimiento() then raise exception 'El sistema esta en mantenimiento.'; end if;
+  if (select count(*) from intentos_activacion where usuario = v_usuario and creado > now() - interval '15 minutes') >= 8 then
+    raise exception 'Demasiados intentos. Espera 15 minutos e intenta de nuevo.';
+  end if;
   select * into inv from invitaciones where usuario = v_usuario and not usado for update;
   if not found
      or inv.codigo_hash <> crypt(coalesce(new.raw_user_meta_data ->> 'codigo', ''), inv.codigo_hash)
@@ -1305,7 +1324,7 @@ create or replace function restablecer_contrasena(p_perfil uuid, p_nueva text) r
 language plpgsql security definer set search_path = public, extensions as $$
 begin
   if not _alcance_perfil(p_perfil) then raise exception 'No autorizado.'; end if;
-  if length(coalesce(p_nueva, '')) < 6 then raise exception 'La contrasena debe tener al menos 6 caracteres.'; end if;
+  if length(coalesce(p_nueva, '')) < 8 or length(p_nueva) > 72 or p_nueva !~ '[A-Za-z]' or p_nueva !~ '[0-9]' then raise exception 'La contrasena debe tener al menos 8 caracteres, con letras y numeros.'; end if;
   update auth.users set encrypted_password = crypt(p_nueva, gen_salt('bf')), updated_at = now() where id = p_perfil;
   perform _notificar(p_perfil, 'restableció tu contraseña.');
 end $$;
@@ -1926,6 +1945,31 @@ do $$ declare i record; begin
   for i in select id from instituciones loop perform _sembrar_grados(i.id); end loop;
 end $$;
 
+-- 10b. Proteccion de la base de datos
+--   - toda tabla con RLS (sin politica = nadie ve nada); el publico (anon) no toca ninguna tabla;
+--   - los usuarios con sesion solo LEEN tablas (lo que su rol permita); toda escritura pasa por las funciones del sistema;
+--   - config e instituciones_correo (claves y conexiones de correo) no se pueden leer ni con sesion;
+--   - las funciones solo las puede ejecutar quien tiene sesion, salvo las 4 del acceso publico;
+--   - tiempo maximo por consulta, para que nadie sature la base.
+do $$
+declare t record;
+begin
+  for t in select tablename from pg_tables where schemaname = 'public' loop
+    execute format('alter table public.%I enable row level security', t.tablename);
+  end loop;
+end $$;
+revoke all on all tables in schema public from anon;
+revoke insert, update, delete, truncate, references, trigger on all tables in schema public from authenticated;
+revoke all on config, instituciones_correo from authenticated;
+alter default privileges in schema public revoke all on tables from anon;
+alter default privileges in schema public revoke insert, update, delete, truncate on tables from authenticated;
+revoke all on all sequences in schema public from anon, authenticated;
+revoke execute on all functions in schema public from public, anon;
+grant execute on all functions in schema public to authenticated;
+alter default privileges in schema public revoke execute on functions from public, anon;
+alter role anon set statement_timeout = '5s';
+alter role authenticated set statement_timeout = '30s';
+
 -- 11. Permisos de ejecucion: solo lo necesario queda abierto
 -- ---------------------------------------------------------------------------
 do $$
@@ -1954,4 +1998,5 @@ begin
     execute format('revoke all on function %s from public, anon, authenticated', f);
   end loop;
 end $$;
--- Quedan abiertas a todos: buscar_instituciones, solicitar_afiliacion, verificar_activacion, estado_sistema (y las funciones de apoyo de las politicas)
+-- Acceso publico (sin sesion): solo estas cuatro
+grant execute on function buscar_instituciones(text), solicitar_afiliacion(bigint, text, text, text), verificar_activacion(text, text), estado_sistema() to anon;

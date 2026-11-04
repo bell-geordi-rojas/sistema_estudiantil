@@ -76,3 +76,9 @@ El APK se firma con una clave permanente guardada en los *secrets* de GitHub (`A
 5. Como dueño: **Instituciones** → crear la institución → **+ Administrador** → entregar usuario y código al director.
 
 > La clave `sb_publishable_…` de `index.html` es pública por diseño; no da acceso a nada sin una cuenta.
+
+## Seguridad
+- HTTPS obligatorio (GitHub Pages lo fuerza y la pagina redirige si se abre por http). Politica de contenido (CSP): solo corre codigo de la propia pagina y solo se habla con esta base de datos; la pagina no se puede incrustar en otra.
+- La clave de index.html es la publica (publishable): sirve para llegar a la base, que protege cada fila con reglas (RLS). La clave secreta (service_role) no esta ni estuvo nunca en el repositorio.
+- Base de datos: todas las tablas con RLS; sin sesion no se lee ni escribe ninguna tabla; con sesion solo se lee y todo cambio pasa por las funciones del sistema; las claves de correo (config) no se pueden leer; solo 4 funciones son publicas; tiempo maximo por consulta.
+- Contrasenas: minimo 8, con letras y numeros. Los codigos de activacion se bloquean 15 minutos tras 8 intentos fallidos.

@@ -3,11 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Seguridad: solo se ejecuta código de esta página y solo se habla con esta base de datos; todo por HTTPS -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://tikpnokwqkofitguvpdx.supabase.co; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'; upgrade-insecure-requests">
+<meta name="referrer" content="no-referrer">
 <title>SINEVA</title>
 <link rel="preconnect" href="https://tikpnokwqkofitguvpdx.supabase.co" crossorigin>
 <link rel="icon" href="logo.png" type="image/png">
 <link rel="apple-touch-icon" href="logo.png">
 <script>
+// HTTPS obligatorio (GitHub Pages ya lo fuerza; esto cubre cualquier otra forma de abrir la página) y la página no se deja incrustar en otra
+if (location.protocol === "http:" && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) location.replace("https:" + location.href.slice(5));
+try { if (window.top !== window.self) { document.documentElement.style.display = "none"; window.top.location = window.self.location; } } catch { document.documentElement.style.display = "none"; }
 try { document.documentElement.dataset.theme = localStorage.getItem("tema") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); } catch { document.documentElement.dataset.theme = "light"; }
 try { document.documentElement.dataset.efectos = localStorage.getItem("efectos") === "off" ? "off" : "on"; } catch { document.documentElement.dataset.efectos = "on"; }
 </script>
@@ -419,6 +425,7 @@ const avatarDe = (texto, clave, pid) => { const f = pid && fotos[pid]; if (f && 
   const ini = String(texto).split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join("").toUpperCase();
   return `<div class="av" style="background:${COLORS[h % COLORS.length]}">${esc(ini)}</div>`; };
 let tt; function toast(m) { const t = $("#toast"); t.textContent = m; t.classList.add("show"); clearTimeout(tt); tt = setTimeout(() => t.classList.remove("show"), 3200); }
+const claveValida = c => typeof c === "string" && c.length >= 8 && c.length <= 72 && /[A-Za-z]/.test(c) && /[0-9]/.test(c);
 const guardarLocal = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} };
 const leerLocal = k => { try { return localStorage.getItem(k); } catch { return null; } };
 async function copiar(texto) {
@@ -455,7 +462,7 @@ function traducirError(j, status) {
   if (/Email not confirmed/i.test(m)) return "Supabase exige confirmar el correo. Desactiva «Confirm email» en Authentication → Providers → Email.";
   if (/Database error saving new user/i.test(m)) return "Usuario o código de activación inválido, o la cuenta ya fue activada.";
   if (/email.*(invalid|not valid)|invalid.*email/i.test(m)) return "Supabase rechazó el correo interno de la cuenta. Avisa al administrador del sistema.";
-  if (/at least \d+ characters|Password should/i.test(m)) return "La contraseña debe tener al menos 6 caracteres.";
+  if (/at least \d+ characters|Password should|weak|pwned|leaked/i.test(m)) return "La contraseña debe tener al menos 8 caracteres, con letras y números, y no ser una contraseña muy común.";
   return m || `Error del servidor (${status}).`;
 }
 async function http(ruta, { method = "GET", body, headers } = {}, reintento = false) {
@@ -1296,8 +1303,8 @@ function vCuenta() {
     <div class="err"></div><div><button class="btn">Guardar nombre</button></div></form></div>
     <div class="card"><h2>Apariencia</h2><p style="margin-top:0;color:var(--mute)">Efectos visuales: fundido entre pantallas, ventanas que crecen desde su tarjeta, desenfoque y zoom al pasar el cursor. Si te molestan o el equipo va lento, apágalos.</p>
     <button class="btn ${efectosActivos() ? "sec" : ""}" data-a="efectos">${efectosActivos() ? "Desactivar efectos visuales" : "Activar efectos visuales"}</button></div>
-    <div class="card"><h2>Cambiar contraseña</h2><form class="form" id="fPass"><label>Nueva contraseña<input type="password" name="a" minlength="6" required autocomplete="new-password"></label>
-    <label>Repite la contraseña<input type="password" name="b" minlength="6" required autocomplete="new-password"></label>
+    <div class="card"><h2>Cambiar contraseña</h2><form class="form" id="fPass"><label>Nueva contraseña (mín. 8, con letras y números)<input type="password" name="a" minlength="8" required autocomplete="new-password"></label>
+    <label>Repite la contraseña<input type="password" name="b" minlength="8" required autocomplete="new-password"></label>
     <div class="err"></div><div><button class="btn">Cambiar contraseña</button></div></form></div>`;
 }
 // Reduce la imagen elegida a un cuadrado de 192x192 (JPEG) para guardarla como foto de perfil
@@ -1335,8 +1342,8 @@ function pantallaLogin() {
     <label>Contraseña<input type="password" name="clave" required autocomplete="current-password"></label><div class="err" id="err"></div><button class="btn">Ingresar</button></form>`;
   else if (tabLogin === "activar") cuerpo = `<form class="form" id="fActivar" style="max-width:none"><p style="margin:0;color:var(--mute)">Usa el usuario y el código que te entregó tu institución y crea tu contraseña.</p>
     <label>Usuario o correo institucional<input name="usuario" required autocapitalize="none" autocomplete="username"></label><label>Código de activación<input name="codigo" required autocapitalize="characters" autocomplete="off"></label>
-    <label>Crea tu contraseña (mín. 6)<input type="password" name="a" minlength="6" required autocomplete="new-password"></label>
-    <label>Repite la contraseña<input type="password" name="b" minlength="6" required autocomplete="new-password"></label><div class="err" id="err"></div><button class="btn">Activar mi cuenta</button></form>`;
+    <label>Crea tu contraseña (mín. 8, con letras y números)<input type="password" name="a" minlength="8" required autocomplete="new-password"></label>
+    <label>Repite la contraseña<input type="password" name="b" minlength="8" required autocomplete="new-password"></label><div class="err" id="err"></div><button class="btn">Activar mi cuenta</button></form>`;
   else if (tabLogin === "descargar") cuerpo = descargasHTML();
   else cuerpo = `<form class="form" id="fAfil" style="max-width:none"><p style="margin:0;color:var(--mute)">Busca tu institución y deja tus nombres. Cuando te aprueben recibirás un usuario y un código para activar tu cuenta.</p>
     <label>Institución<input id="qInst" placeholder="Escribe el nombre de tu institución" autocomplete="off"></label><div class="res" id="resInst"></div>
@@ -2007,7 +2014,8 @@ const acciones = {
   async permisos(d) { const p = perfilDe(d.id); if (p) abrirPermisos(p); },
   async estado(d) { const p = perfilDe(d.id); await rpc("actualizar_estado_perfil", { p_perfil: p.id, p_activo: !p.activo }); await recargarTodo(); toast(p.activo ? "Cuenta desactivada." : "Cuenta activada."); },
   async clave(d) {
-    const p = perfilDe(d.id), n = await pedir(`Nueva contraseña para ${nombreCompleto(p)} (mín. 6 caracteres):`); if (n === null) return;
+    const p = perfilDe(d.id), n = await pedir(`Nueva contraseña para ${nombreCompleto(p)} (mín. 8 caracteres, con letras y números):`); if (n === null) return;
+    if (!claveValida(n)) { toast("La contraseña debe tener al menos 8 caracteres, con letras y números."); return; }
     await rpc("restablecer_contrasena", { p_perfil: p.id, p_nueva: n }); toast("Contraseña actualizada. Avísale a la persona.");
   },
   async rol(d) {
@@ -2180,6 +2188,7 @@ document.addEventListener("submit", ev => {
       await iniciarSesion(d.usuario, d.clave); await entrar(); conTransicion(render);
     } else if (f.id === "fActivar") {
       if (d.a !== d.b) falla("Las contraseñas no coinciden.");
+      if (!claveValida(d.a)) falla("La contraseña debe tener al menos 8 caracteres, con letras y números.");
       await activarCuenta(d.usuario, d.codigo.trim(), d.a); await entrar(); render(); toast("¡Cuenta activada! Bienvenido.");
     } else if (f.id === "fAfil") {
       if (!instSel) falla("Busca y elige tu institución de la lista.");
@@ -2257,6 +2266,7 @@ document.addEventListener("submit", ev => {
       yo = await rpc("mi_sesion"); await recargarTodo(); toast("Datos actualizados.");
     } else if (f.id === "fPass") {
       if (d.a !== d.b) falla("Las contraseñas no coinciden.");
+      if (!claveValida(d.a)) falla("La contraseña debe tener al menos 8 caracteres, con letras y números.");
       await http("/auth/v1/user", { method: "PUT", body: { password: d.a } }); f.reset(); toast("Contraseña cambiada.");
     }
   });
