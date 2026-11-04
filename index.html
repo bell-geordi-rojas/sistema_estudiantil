@@ -137,7 +137,7 @@ dialog::backdrop{background:rgba(10,14,24,.55)}
 .menupop button.on{background:var(--violet-l);color:var(--nav-on);font-weight:600}
 .menupop .sep{border:0;border-top:1px solid var(--line);margin:6px 0}
 .menupop .badge{margin-left:auto;background:var(--red);color:#fff;border-radius:10px;padding:0 7px;font-size:11px;font-weight:700}
-@media(max-width:900px){.layout{grid-template-columns:1fr}nav{display:none}.menuwrap{display:block}.hbtn .txt{display:none}.grid{grid-template-columns:1fr}.datos,.row2{grid-template-columns:1fr}main{padding:16px}}
+@media(max-width:900px){.layout{grid-template-columns:1fr}nav{display:none}.menuwrap{display:block}.hbtn .txt{display:none}header .user,header [data-a=salir]{order:2}header [data-a=salir]{margin-left:auto}.grid{grid-template-columns:1fr}.datos,.row2{grid-template-columns:1fr}main{padding:16px}}
 </style>
 </head>
 <body>
@@ -699,8 +699,8 @@ function vCuenta() {
 function cabecera(conUsuario, menu = "") {
   const sub = yo && yo.institucion ? yo.institucion.nombre : "Propietario";
   return `<header><div class="logo"><i></i>ESTUDIANTIL</div><div class="sp"></div>
-    <button class="hbtn" data-a="tema" title="Cambiar entre modo claro y oscuro">${temaActual() === "dark" ? "☀<span class=\"txt\"> Modo claro</span>" : "☾<span class=\"txt\"> Modo oscuro</span>"}</button>
-    ${conUsuario ? `<div class="user">${avatarDe(nombreCompleto(yo), yo.usuario)}<div>${esc(nombreCompleto(yo))}<small>${ROL[yo.rol]} · ${esc(sub)}</small></div></div><button class="hbtn" data-a="salir">Salir</button>` : ""}${menu ? `<div class="menuwrap"><button class="hbtn menubtn" data-a="menu" aria-label="Menú" title="Menú">⋮</button><div class="menupop" id="menuPop">${menu}</div></div>` : ""}</header>`;
+    <button class="hbtn" data-a="tema" title="Cambiar entre modo claro y oscuro">${temaActual() === "dark" ? "☀<span class=\"txt\"> Modo claro</span>" : "☾<span class=\"txt\"> Modo oscuro</span>"}</button>${menu ? `<div class="menuwrap"><button class="hbtn menubtn" data-a="menu" aria-label="Menú" title="Menú">⋮</button><div class="menupop" id="menuPop">${menu}</div></div>` : ""}
+    ${conUsuario ? `<div class="user">${avatarDe(nombreCompleto(yo), yo.usuario)}<div>${esc(nombreCompleto(yo))}<small>${ROL[yo.rol]} · ${esc(sub)}</small></div></div><button class="hbtn" data-a="salir">Salir</button>` : ""}</header>`;
 }
 function pantallaLogin() {
   const t = (id, txt) => `<button class="${tabLogin === id ? "on" : ""}" data-a="tab" data-id="${id}">${txt}</button>`;
