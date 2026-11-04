@@ -292,6 +292,9 @@ const convertirDouble = t => { t = String(t).trim(); return t !== "" && !isNaN(N
 const notaValida = v => v !== null && v >= NOTA_MIN && v <= NOTA_MAX;
 const nombreValido = n => n !== "" && !n.includes("|") && !/\d/.test(n);
 const codigoValido = c => c !== "" && c.length <= 15 && /^[A-Za-z0-9]+$/.test(c);
+// Correo institucional de una cuenta: usuario@dominio de su institución (si la institución configuró su dominio)
+const dominioDe = instId => ((insts.find(i => i.id === instId) || {}).dominio) || (yo && yo.institucion && yo.institucion.id === instId ? yo.institucion.dominio : null) || null;
+const correoInst = (usuario, instId) => { const d = dominioDe(instId); return d ? `${usuario}@${d}` : usuario; };
 const nombreCompleto = p => `${p.nombres} ${p.apellidos || ""}`.trim();
 const COLORS = ["#e08a5c", "#8b3df0", "#0e9aa7", "#1f6feb", "#10b981", "#d946ef"];
 const FOTO_OK = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/;
@@ -354,7 +357,9 @@ async function http(ruta, { method = "GET", body, headers } = {}, reintento = fa
 }
 const rpc = (fn, args = {}) => http(`/rest/v1/rpc/${fn}`, { method: "POST", body: args });
 const sel = q => http(`/rest/v1/${q}`);
-const emailDe = u => `${u.trim().toLowerCase()}@${EMAIL_DOMINIO}`;
+// El usuario puede escribirse como «rjuarezb» o como su correo institucional «rjuarezb@uss.edu.pe»: solo cuenta lo anterior a la @
+const usuarioDe = u => String(u).trim().toLowerCase().split("@")[0];
+const emailDe = u => `${usuarioDe(u)}@${EMAIL_DOMINIO}`;   // correo interno con el que se registra en Supabase Auth
 
 async function authPost(ruta, cuerpo) {
   let r;
@@ -368,10 +373,11 @@ async function iniciarSesion(usuario, clave) {
   fijarSesion(await authPost("/auth/v1/token?grant_type=password", { email: emailDe(usuario), password: clave }));
 }
 async function activarCuenta(usuario, codigo, clave) {
+  usuario = usuarioDe(usuario);
   cerrarSesionLocal();
   const info = await rpc("verificar_activacion", { p_usuario: usuario, p_codigo: codigo });
   if (!info) throw new Error("Usuario o código incorrecto, o la cuenta ya fue activada.");
-  const j = await authPost("/auth/v1/signup", { email: emailDe(usuario), password: clave, data: { usuario: usuario.trim().toLowerCase(), codigo } });
+  const j = await authPost("/auth/v1/signup", { email: emailDe(usuario), password: clave, data: { usuario, codigo } });
   if (j.access_token) fijarSesion(j); else await iniciarSesion(usuario, clave);
 }
 
@@ -431,7 +437,7 @@ const consultasComunes = () => Promise.all([
 const consultasRol = () => Promise.all([
   sel("instituciones?select=*&order=nombre").catch(() => []),
   sel("solicitudes?select=*&estado=eq.pendiente&order=creado").catch(() => []),
-  sel("invitaciones?select=id,rol,nombres,apellidos,usuario,institucion_id,docente_id,creado&usado=eq.false&order=creado.desc").catch(() => []),
+  sel("invitaciones?select=id,rol,nombres,apellidos,usuario,institucion_id,docente_id,correo,creado&usado=eq.false&order=creado.desc").catch(() => []),
 ]);
 async function cargarDatos(adelantadas) {
   const gest = puedeGestionar(), verInst = yo.rol === "dueno" || yo.rol === "admin";
@@ -439,7 +445,7 @@ async function cargarDatos(adelantadas) {
   const [[e, p, cu, pe], [i, s, v]] = await Promise.all(adelantadas || [
     consultasComunes(),
     Promise.all([verInst ? sel("instituciones?select=*&order=nombre") : nada, gest ? sel("solicitudes?select=*&estado=eq.pendiente&order=creado") : nada,
-      gest ? sel("invitaciones?select=id,rol,nombres,apellidos,usuario,institucion_id,docente_id,creado&usado=eq.false&order=creado.desc") : nada]),
+      gest ? sel("invitaciones?select=id,rol,nombres,apellidos,usuario,institucion_id,docente_id,correo,creado&usado=eq.false&order=creado.desc") : nada]),
   ]);
   const i2 = verInst ? i : sin, s2 = gest ? s : sin, v2 = gest ? v : sin;
   cursos = cu; periodos = pe;
@@ -759,7 +765,7 @@ function vUsuarios() {
   const verInst = yo.rol === "dueno";
   const tabla = lista.length ? `<div class="scroll"><table><thead><tr><th>Cuenta</th><th>Rol</th>${verInst ? "<th>Institución</th>" : ""}<th>Docente</th><th>Estado</th><th></th></tr></thead><tbody>` +
     lista.map(p => { const d = perfilDe(p.docente_id), i = instDe(p.institucion_id);
-      return `<tr><td><div class="who">${avatarDe(nombreCompleto(p), p.usuario, p.id)}<div>${esc(nombreCompleto(p))}<small>${esc(p.usuario)}</small></div></div></td>
+      return `<tr><td><div class="who">${avatarDe(nombreCompleto(p), p.usuario, p.id)}<div>${esc(nombreCompleto(p))}<small>${esc(correoInst(p.usuario, p.institucion_id))}</small></div></div></td>
       <td><span class="tag">${ROL[p.rol]}</span></td>${verInst ? `<td>${i ? esc(i.nombre) : "—"}</td>` : ""}<td>${p.rol === "alumno" ? (d ? esc(nombreCompleto(d)) : "<small>—</small>") : "<small>—</small>"}</td>
       <td><span class="pill ${p.activo ? "ok" : "na"}">${p.activo ? "Activa" : "Desactivada"}</span></td>
       <td style="white-space:nowrap">${p.rol !== "admin" || yo.rol === "dueno" ? `<button class="btn sm sec" data-a="permisos" data-id="${p.id}">Permisos</button> ` : ""}
@@ -768,8 +774,8 @@ function vUsuarios() {
         ${yo.rol === "dueno" && p.rol !== "alumno" ? `<button class="btn sm sec" data-a="rol" data-id="${p.id}">${p.rol === "admin" ? "Quitar admin" : "Hacer admin"}</button> ` : ""}
         <button class="btn del" data-a="borrar-cuenta" data-id="${p.id}">Eliminar</button></td></tr>`; }).join("") + `</tbody></table></div>` : `<div class="empty">Aún no hay cuentas activadas.</div>`;
   const pend = invs.length ? `<div class="card"><h2>Cuentas pendientes de activar</h2><div class="scroll"><table><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th></th></tr></thead><tbody>` +
-    invs.map(v => `<tr><td>${esc(nombreCompleto(v))}</td><td><code>${esc(v.usuario)}</code></td><td><span class="tag">${ROL[v.rol]}</span></td>
-      <td style="white-space:nowrap"><button class="btn sm sec" data-a="regen" data-id="${v.id}">Nuevo código</button> <button class="btn del" data-a="borrar-inv" data-id="${v.id}">Anular</button></td></tr>`).join("") + `</tbody></table></div></div>` : "";
+    invs.map(v => `<tr><td>${esc(nombreCompleto(v))}</td><td><code>${esc(correoInst(v.usuario, v.institucion_id))}</code>${v.correo ? `<br><small>✉ ${esc(v.correo)}</small>` : ""}</td><td><span class="tag">${ROL[v.rol]}</span></td>
+      <td style="white-space:nowrap"><button class="btn sm sec" data-a="regen" data-id="${v.id}">${v.correo ? "Reenviar código" : "Nuevo código"}</button> <button class="btn del" data-a="borrar-inv" data-id="${v.id}">Anular</button></td></tr>`).join("") + `</tbody></table></div></div>` : "";
   return `<div class="card"><h2>Cuentas y permisos <button class="btn" data-v="invitar">+ Registrar estudiante</button></h2>${tabla}</div>${pend}`;
 }
 function vSolicitudes() {
@@ -782,7 +788,88 @@ function vSolicitudes() {
       <td>${new Date(s.creado).toLocaleDateString("es-PE")}</td><td>${selDoc}</td>
       <td style="white-space:nowrap"><button class="btn sm" data-a="aprobar" data-id="${s.id}">Aprobar</button> <button class="btn del" data-a="rechazar" data-id="${s.id}">Rechazar</button></td></tr>`; }).join("") + `</tbody></table></div></div>`;
 }
+/* ===== Registro de varias cuentas a la vez (nombre completo + correo personal por línea) ===== */
+let invModo = "uno";   // "uno" | "masivo"
+const nuevoMasivo = (ant = {}) => ({ inst: ant.inst || null, rol: ant.rol || "alumno", docente: ant.docente || "", orden: ant.orden || "nombres", texto: "", filas: null, resultados: null });
+let masivo = nuevoMasivo();
+const PARTICULAS = new Set(["de", "del", "la", "las", "los", "y", "san", "santa", "da", "di", "van", "von"]);
+const sinTildes = s => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+const EMAIL_OK = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+// «de la Cruz» cuenta como una sola palabra: las partículas se pegan a la palabra que sigue
+function unidades(txt) { const u = []; let pend = []; for (const t of txt.split(/\s+/).filter(Boolean)) { if (PARTICULAS.has(t.toLowerCase())) pend.push(t); else { u.push([...pend, t].join(" ")); pend = []; } } if (pend.length) u.push(pend.join(" ")); return u; }
+// Separa «Bell Geordi Rojas Juarez» en nombres y 2 apellidos (o «Rojas Juarez Bell Geordi» si el orden es apellidos primero)
+function separarNombre(completo, orden) {
+  const u = unidades(completo);
+  if (u.length < 2) return null;
+  if (orden === "apellidos") return u.length >= 3 ? { ap1: u[0], ap2: u[1], nombres: u.slice(2).join(" ") } : { ap1: u[0], ap2: "", nombres: u[1] };
+  return u.length >= 3 ? { nombres: u.slice(0, -2).join(" "), ap1: u[u.length - 2], ap2: u[u.length - 1] } : { nombres: u[0], ap1: u[1], ap2: "" };
+}
+// Igual que la base de datos: inicial del 1er apellido + 2do apellido + inicial del nombre (rjuarezb); sin dominio: inicial + apellido
+function usuarioPrevio(f, conDominio) {
+  const inicialAp = f.ap1.replace(/^((de|del|la|las|los|y|san|santa|da|di|van|von)\s+)+/i, "")[0] || f.ap1[0];   // la inicial ignora partículas (de la Cruz -> c)
+  const base = conDominio && f.ap2 ? inicialAp + f.ap2 + f.nombres[0] : f.nombres[0] + f.ap1;
+  return (sinTildes(base).toLowerCase().replace(/[^a-z0-9]/g, "") || "usr").slice(0, 26);
+}
+function parsearMasivo(texto, orden) {
+  const lineas = texto.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (lineas.length && /nombre/i.test(lineas[0]) && /correo|mail/i.test(lineas[0])) lineas.shift();   // encabezado de un CSV
+  return lineas.map((linea, i) => {
+    const partes = linea.split(/\t|;|,/).map(p => p.trim()).filter(Boolean);
+    const correo = (partes.find(p => p.includes("@")) || "").toLowerCase(), otras = partes.filter(p => !p.includes("@"));
+    const f = { n: i + 1, linea, correo, nombres: "", ap1: "", ap2: "", error: "" };
+    let s = null;
+    if (otras.length >= 2) {   // «Apellidos, Nombres, correo»: las dos primeras partes ya vienen separadas
+      const ap = unidades(otras[0]); s = { ap1: ap[0] || "", ap2: ap.slice(1).join(" "), nombres: otras[1] };
+    } else if (otras.length === 1) s = separarNombre(otras[0], orden);
+    if (!s || !s.nombres || !s.ap1) f.error = "Escribe nombres y al menos un apellido";
+    else { Object.assign(f, s); if (/[0-9|]/.test(f.nombres + f.ap1 + f.ap2) || (f.nombres + f.ap1 + f.ap2).length > 100) f.error = "El nombre no puede tener números ni «|»"; }
+    if (!f.error && f.correo && !EMAIL_OK.test(f.correo)) f.error = "El correo no es válido";
+    return f;
+  });
+}
+const instMasivo = () => yo.rol === "dueno" ? Number(masivo.inst || (insts[0] && insts[0].id)) : yo.institucion.id;
+function vMasivo() {
+  if (masivo.resultados) return resultadosMasivo();
+  const rolesOpc = yo.rol === "dueno" ? ["admin", "docente", "alumno"] : yo.rol === "admin" ? ["docente", "alumno"] : ["alumno"];
+  const instId = instMasivo(), docs = yo.rol === "docente" ? [] : docentesDe(instId), dom = dominioDe(instId);
+  const avisoDom = dom ? `<p class="msg">Correo institucional: <b>usuario@${esc(dom)}</b>, por ejemplo <b>rjuarezb@${esc(dom)}</b> para «Bell Geordi Rojas Juarez».</p>`
+    : `<p class="msg warn">Esta institución aún no tiene dominio de correo institucional, así que los usuarios se generan sin él (inicial + apellido). Defínelo en ${yo.rol === "dueno" ? "«Instituciones»" : "«Cursos y trimestres»/«Administrar cursos»"}.</p>`;
+  const avisoCorreo = yo.correo ? "" : `<p class="msg warn">El envío de correos aún no está conectado a Gmail: las cuentas se crearán igual y podrás descargar un CSV con las credenciales (mira «Conectar Gmail» en el README).</p>`;
+  return `<div class="card"><h2>Registrar varios a la vez</h2>
+    <p style="margin-top:0;color:var(--mute)">Pega <b>una persona por línea</b>: nombre completo y correo personal (Gmail), separados por coma, punto y coma o tabulación. El sistema genera el usuario y envía las credenciales a ese correo.</p>${avisoDom}${avisoCorreo}
+    <form class="form wide" id="fMas">
+    <div class="row2">${yo.rol === "dueno" ? `<label>Institución<select name="inst" id="mInst">${insts.map(i => `<option value="${i.id}" ${i.id === instId ? "selected" : ""}>${esc(i.nombre)}</option>`).join("")}</select></label>` : ""}
+    <label>Rol<select name="rol" id="mRol">${rolesOpc.map(r => `<option value="${r}" ${masivo.rol === r ? "selected" : ""}>${ROL[r]}</option>`).join("")}</select></label></div>
+    ${yo.rol === "docente" ? "" : `<label id="mDocWrap" style="${masivo.rol === "alumno" ? "" : "display:none"}">Docente de estos alumnos<select name="docente" id="mDoc">${docs.map(d => `<option value="${d.id}" ${d.id === masivo.docente ? "selected" : ""}>${esc(nombreCompleto(d))}</option>`).join("") || "<option value=''>(no hay docentes)</option>"}</select></label>`}
+    <label>Cómo vienen escritos los nombres<select name="orden"><option value="nombres" ${masivo.orden === "nombres" ? "selected" : ""}>Nombres y luego apellidos (Bell Geordi Rojas Juarez)</option><option value="apellidos" ${masivo.orden === "apellidos" ? "selected" : ""}>Apellidos y luego nombres (Rojas Juarez Bell Geordi)</option></select></label>
+    <label>Lista (máx. 300 personas)<textarea name="texto" id="masTexto" rows="9" placeholder="Bell Geordi Rojas Juarez, bell@gmail.com&#10;Ana María Pérez López, ana.perez@gmail.com" spellcheck="false">${esc(masivo.texto)}</textarea></label>
+    <div class="bar"><button type="button" class="btn sec" data-a="mas-archivo">📎 Cargar un archivo CSV o TXT</button></div>
+    <div class="err"></div><div><button class="btn">Revisar la lista</button></div></form></div>${masivo.filas ? vistaPreviaMasivo(dom) : ""}`;
+}
+function vistaPreviaMasivo(dom) {
+  const validas = masivo.filas.filter(f => !f.error);
+  return `<div class="card"><h2>Revisión: ${validas.length} de ${masivo.filas.length} lista(s) para crear</h2><div class="scroll"><table><thead><tr><th>#</th><th>Nombres</th><th>Apellidos</th><th>${dom ? "Correo institucional" : "Usuario"}</th><th>Correo personal</th><th></th></tr></thead><tbody>` +
+    masivo.filas.map(f => `<tr style="${f.error ? "background:var(--warn-bg)" : ""}"><td>${f.n}</td><td>${esc(f.nombres)}</td><td>${esc((f.ap1 + " " + f.ap2).trim())}</td>
+      <td>${f.error ? "—" : `<code>${esc(usuarioPrevio(f, !!dom))}${dom ? "@" + esc(dom) : ""}</code>`}</td><td>${f.correo ? esc(f.correo) : "<small>sin correo</small>"}</td>
+      <td>${f.error ? `<span class="pill no" style="white-space:normal">${esc(f.error)}</span>` : `<span class="pill ok">Lista</span>`}</td></tr>`).join("") + `</tbody></table></div>
+    <p style="color:var(--mute);font-size:13px">Si un usuario ya existe se le agrega un número (rjuarezb2). Las líneas con error se omiten: corrígelas arriba y vuelve a revisar.</p>
+    <div class="bar"><button class="btn" data-a="mas-crear" ${validas.length ? "" : "disabled"}>Crear ${validas.length} cuenta(s)${yo.correo ? " y enviar las credenciales" : ""}</button><span id="masProg" style="color:var(--mute)"></span></div></div>`;
+}
+function resultadosMasivo() {
+  const r = masivo.resultados, ok = r.filter(x => x.ok), env = ok.filter(x => x.enviado), fallos = r.filter(x => !x.ok);
+  return `<div class="card"><h2>Resultado del registro</h2><div class="kpis"><div class="kpi"><span>Cuentas creadas</span><b style="color:var(--green)">${ok.length}</b></div>
+    <div class="kpi"><span>Correos enviados</span><b>${env.length}</b></div><div class="kpi"><span>Con error</span><b style="color:${fallos.length ? "var(--red)" : "inherit"}">${fallos.length}</b></div></div>
+    ${!yo.correo ? `<p class="msg warn">El envío de correos no está conectado: entrega las credenciales con el CSV.</p>` : ok.length > env.length ? `<p class="msg warn">${ok.length - env.length} cuenta(s) se crearon sin enviar correo (no tenían correo personal o el envío falló): sus credenciales están en el CSV.</p>` : ""}
+    <p class="msg warn">Los códigos de activación solo se muestran ahora. Descarga el CSV antes de salir de esta pantalla.</p>
+    <div class="bar"><button class="btn" data-a="mas-csv">⇩ Descargar CSV con las credenciales</button><button class="btn sec" data-a="mas-nuevo">Registrar más personas</button></div>
+    <div class="scroll"><table><thead><tr><th>Nombre</th><th>Usuario</th><th>Código</th><th>Correo personal</th><th>Estado</th></tr></thead><tbody>` +
+    r.map(x => `<tr><td>${esc(x.nombre)}</td><td>${x.ok ? `<code>${esc(x.correo_institucional || x.usuario)}</code>` : "—"}</td><td>${x.ok ? `<code>${esc(x.codigo)}</code>` : "—"}</td><td>${x.correo_personal ? esc(x.correo_personal) : "<small>—</small>"}</td>
+      <td>${x.ok ? (x.enviado ? `<span class="pill ok">Enviado</span>` : `<span class="pill na">Creada, sin enviar</span>`) : `<span class="pill no" style="white-space:normal">${esc(x.error)}</span>`}</td></tr>`).join("") + `</tbody></table></div></div>`;
+}
 function vInvitar(pre = {}) {
+  const tab = (id, txt) => `<button class="${invModo === id ? "on" : ""}" data-a="inv-modo" data-id="${id}">${txt}</button>`;
+  return `<div class="tabs" style="max-width:420px">${tab("uno", "Uno solo")}${tab("masivo", "Varios a la vez")}</div>` + (invModo === "masivo" ? vMasivo() : vInvitarUno(pre));
+}function vInvitarUno(pre = {}) {
   const rolesOpc = yo.rol === "dueno" ? ["admin", "docente", "alumno"] : yo.rol === "admin" ? ["docente", "alumno"] : ["alumno"];
   const instId = yo.rol === "dueno" ? (pre.inst || (insts[0] && insts[0].id)) : yo.institucion.id;
   const docs = yo.rol === "docente" ? [] : docentesDe(instId);
@@ -791,6 +878,7 @@ function vInvitar(pre = {}) {
     ${yo.rol === "dueno" ? `<label>Institución<select name="inst" id="invInst">${insts.map(i => `<option value="${i.id}" ${i.id === instId ? "selected" : ""}>${esc(i.nombre)}</option>`).join("")}</select></label>` : ""}
     <label>Rol<select name="rol" id="invRol">${rolesOpc.map(r => `<option value="${r}" ${(pre.rol || "alumno") === r ? "selected" : ""}>${ROL[r]}</option>`).join("")}</select></label>
     <div class="row2"><label>Nombres<input name="nombres" required></label><label>Apellidos<input name="apellidos"></label></div>
+    <label>Correo personal (opcional: ahí se envían las credenciales)<input type="email" name="correo" autocomplete="off" placeholder="nombre@gmail.com"></label>
     ${yo.rol === "docente" ? "" : `<label id="invDocWrap">Docente (para alumnos)<select name="docente">${docs.map(d => `<option value="${d.id}">${esc(nombreCompleto(d))}</option>`).join("") || "<option value=''>(no hay docentes)</option>"}</select></label>`}
     <div class="err" id="err"></div><div><button class="btn">${pre.rol && pre.rol !== "alumno" ? "Crear cuenta" : "Registrar"}</button></div></form></div>`;
 }
@@ -808,11 +896,13 @@ function vMantenimiento() {
 function vInstituciones() {
   const crear = yo.rol === "dueno" ? vMantenimiento() + `<div class="card"><h2>Nueva institución afiliada</h2><form class="bar" id="fInst">
       <input name="nombre" placeholder="Nombre (p. ej. María Auxiliadora)" required style="flex:1;min-width:220px">
+      <input name="dominio" placeholder="Dominio de correo (ej. uss.edu.pe)" style="min-width:210px" autocapitalize="none">
       <select name="tipo" title="Tipo de institución"><option value="colegio">Colegio (trimestres)</option><option value="universidad">Universidad (ciclos y notas con peso)</option></select>
       <label style="display:flex;gap:6px;align-items:center">Vence <input type="date" name="vence"></label><button class="btn">Crear</button></form><div class="err"></div></div>` : "";
-  const tabla = insts.length ? `<div class="scroll"><table><thead><tr><th>Institución</th><th>Tipo</th><th>Carpeta</th><th>Docentes</th><th>Estudiantes</th><th>Vence</th><th>Estado</th><th></th></tr></thead><tbody>` +
+  const tabla = insts.length ? `<div class="scroll"><table><thead><tr><th>Institución</th><th>Tipo</th><th>Correo institucional</th><th>Carpeta</th><th>Docentes</th><th>Estudiantes</th><th>Vence</th><th>Estado</th><th></th></tr></thead><tbody>` +
     insts.map(i => { const c = conteoInst(i), vencida = i.vence && i.vence < new Date().toISOString().slice(0, 10);
-      return `<tr><td><b>${esc(i.nombre)}</b></td><td><span class="tag">${i.tipo === "universidad" ? "Universidad" : "Colegio"}</span></td><td><code>Admin/${esc(i.slug)}</code></td><td>${c.docentes}</td><td>${c.estudiantes}</td>
+      return `<tr><td><b>${esc(i.nombre)}</b></td><td><span class="tag">${i.tipo === "universidad" ? "Universidad" : "Colegio"}</span></td>
+      <td style="white-space:nowrap"><input id="dom${i.id}" value="${esc(i.dominio || "")}" placeholder="uss.edu.pe" style="width:130px" autocapitalize="none"> <button class="btn sm sec" data-a="inst-dominio" data-id="${i.id}">Guardar</button></td><td><code>Admin/${esc(i.slug)}</code></td><td>${c.docentes}</td><td>${c.estudiantes}</td>
       <td><input type="date" id="vence${i.id}" value="${esc(i.vence || "")}"></td>
       <td><span class="pill ${i.activa && !vencida ? "ok" : "no"}">${!i.activa ? "Suspendida" : vencida ? "Vencida" : "Activa"}</span></td>
       <td style="white-space:nowrap"><button class="btn sm sec" data-a="inst-guardar" data-id="${i.id}">Guardar fecha</button>
@@ -835,7 +925,9 @@ function vConfig() {
     <p style="margin-top:0;color:var(--mute)">Las notas se registran dentro de un ${nomPeriodo(tipo).toLowerCase()}. Quitar uno borra también sus notas (siempre debe quedar al menos uno).</p>
     <form class="bar" id="fPeriodo"><input name="nombre" placeholder="${tipo === "universidad" ? "p. ej. Ciclo 2026-II" : "p. ej. Trimestre 4"}" maxlength="40" required style="flex:1;min-width:220px"><button class="btn">Agregar ${nomPeriodo(tipo).toLowerCase()}</button></form><div class="err"></div>
     <div class="scroll"><table><tbody>${ps.map(p => filaItem("periodo", p)).join("")}</tbody></table></div></div>` : "";
-  return cursosCard + perCard;
+  const domCard = yo.rol === "admin" ? `<div class="card"><h2>Correo institucional</h2><p style="margin-top:0;color:var(--mute)">Dominio de los correos de tu institución (por ejemplo <code>uss.edu.pe</code>). Con él, el usuario de cada cuenta nueva se genera como <b>rjuarezb@uss.edu.pe</b> (inicial del 1.er apellido + 2.º apellido + inicial del nombre).</p>
+    <form class="bar" id="fDominio"><input name="dominio" value="${esc(yo.institucion.dominio || "")}" placeholder="uss.edu.pe" autocapitalize="none" style="flex:1;min-width:220px"><button class="btn">Guardar dominio</button></form><div class="err"></div></div>` : "";
+  return domCard + cursosCard + perCard;
 }
 function vCarpetas() {
   const ul = items => `<ul>${items || "<li><small>—</small></li>"}</ul>`;
@@ -852,7 +944,7 @@ function vCarpetas() {
 }
 function vCuenta() {
   const tiene = !!fotos[yo.id], grande = avatarDe(nombreCompleto(yo), yo.usuario, yo.id).replace('class="av"', tiene ? 'class="av big" data-a="foto-ampliar" title="Ampliar foto"' : 'class="av big"');
-  return `<div class="card"><h2>Mi cuenta</h2><div class="who" style="gap:16px;align-items:center">${grande}<div><b>${esc(nombreCompleto(yo))}</b> · <code>${esc(yo.usuario)}</code> · <span class="tag">${ROL[yo.rol]}</span><br>
+  return `<div class="card"><h2>Mi cuenta</h2><div class="who" style="gap:16px;align-items:center">${grande}<div><b>${esc(nombreCompleto(yo))}</b> · <code>${esc(yo.institucion ? correoInst(yo.usuario, yo.institucion.id) : yo.usuario)}</code> · <span class="tag">${ROL[yo.rol]}</span><br>
     <small>${yo.institucion ? esc(yo.institucion.nombre) + (yo.institucion.vence ? " · afiliación hasta " + esc(yo.institucion.vence) : "") : "Propietario del sistema"}</small>
     <div class="bar" style="margin:10px 0 0"><button class="btn sm sec" data-a="foto-elegir">📷 ${tiene ? "Cambiar foto" : "Subir foto"}</button>${tiene ? `<button class="btn del" data-a="foto-quitar">Quitar foto</button>` : ""}</div></div></div>
     <input type="file" id="fotoIn" accept="image/*" hidden></div>
@@ -897,10 +989,10 @@ function cabecera(conUsuario, menu = "") {
 function pantallaLogin() {
   const t = (id, txt) => `<button class="${tabLogin === id ? "on" : ""}" data-a="tab" data-id="${id}">${txt}</button>`;
   let cuerpo;
-  if (tabLogin === "ingresar") cuerpo = `<form class="form" id="fLogin" style="max-width:none"><label>Usuario<input name="usuario" required autocomplete="username" autocapitalize="none"></label>
+  if (tabLogin === "ingresar") cuerpo = `<form class="form" id="fLogin" style="max-width:none"><label>Usuario o correo institucional<input name="usuario" required autocomplete="username" autocapitalize="none" placeholder="p. ej. rjuarezb o rjuarezb@uss.edu.pe"></label>
     <label>Contraseña<input type="password" name="clave" required autocomplete="current-password"></label><div class="err" id="err"></div><button class="btn">Ingresar</button></form>`;
   else if (tabLogin === "activar") cuerpo = `<form class="form" id="fActivar" style="max-width:none"><p style="margin:0;color:var(--mute)">Usa el usuario y el código que te entregó tu institución y crea tu contraseña.</p>
-    <label>Usuario<input name="usuario" required autocapitalize="none" autocomplete="username"></label><label>Código de activación<input name="codigo" required autocapitalize="characters" autocomplete="off"></label>
+    <label>Usuario o correo institucional<input name="usuario" required autocapitalize="none" autocomplete="username"></label><label>Código de activación<input name="codigo" required autocapitalize="characters" autocomplete="off"></label>
     <label>Crea tu contraseña (mín. 6)<input type="password" name="a" minlength="6" required autocomplete="new-password"></label>
     <label>Repite la contraseña<input type="password" name="b" minlength="6" required autocomplete="new-password"></label><div class="err" id="err"></div><button class="btn">Activar mi cuenta</button></form>`;
   else if (tabLogin === "descargar") cuerpo = descargasHTML();
@@ -1035,10 +1127,12 @@ function formNota(id, curso) {
 }
 function mostrarCredenciales(v, titulo = "Cuenta creada") {
   abrirDlg(`<div class="dhead"><div><b>${esc(titulo)}</b><small>${ROL[v.rol] || ""}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>
-    <div class="cred"><div><span>Usuario</span><code>${esc(v.usuario)}</code><button class="btn sm sec" data-a="copiar" data-t="${esc(v.usuario)}">Copiar</button></div>
+    <div class="cred">${v.correo_institucional ? `<div><span>Correo institucional</span><code style="font-size:15px">${esc(v.correo_institucional)}</code><button class="btn sm sec" data-a="copiar" data-t="${esc(v.correo_institucional)}">Copiar</button></div>` : ""}
+    <div><span>Usuario</span><code>${esc(v.usuario)}</code><button class="btn sm sec" data-a="copiar" data-t="${esc(v.usuario)}">Copiar</button></div>
     <div><span>Código de activación</span><code>${esc(v.codigo)}</code><button class="btn sm sec" data-a="copiar" data-t="${esc(v.codigo)}">Copiar</button></div></div>
+    ${v.correo_personal ? (v.enviado ? `<p class="msg">✔ Se enviaron las credenciales a <b>${esc(v.correo_personal)}</b>.</p>` : `<p class="msg warn">No se pudo enviar el correo a <b>${esc(v.correo_personal)}</b> (el envío no está configurado o falló). Entrégale las credenciales tú.</p>`) : ""}
     <p class="msg warn">Guarda el código ahora: por seguridad no se vuelve a mostrar (si se pierde, genera uno nuevo en «Cuentas y permisos»). La persona debe entrar en <b>Activar cuenta</b> y crear su contraseña.</p>
-    <button class="btn" data-a="copiar" data-t="Usuario: ${esc(v.usuario)}  Código: ${esc(v.codigo)}">Copiar usuario y código</button>`);
+    <button class="btn" data-a="copiar" data-t="Usuario: ${esc(v.correo_institucional || v.usuario)}  Código: ${esc(v.codigo)}">Copiar usuario y código</button>`);
 }
 function abrirPermisos(p) {
   const claves = p.rol === "alumno" ? PERMISOS_ALUMNO : Object.keys(PERMISOS);
@@ -1079,6 +1173,44 @@ const acciones = {
     const total = alumno ? (mio ? mio.deCurso(c.id, null) : []) : [];
     abrirCompartido(`.ccard[data-id="${c.id}"] .banw`, "banner-curso", `<div class="banw" style="margin:-18px -18px 14px;view-transition-name:banner-curso">${bannerCurso(c.id)}</div><div class="dhead"><div><b>${esc(c.nombre)}</b><small>${alumno && total.length ? `${esUni() ? "Promedio ponderado" : "Promedio"} del curso: ${fmt(mediaPond(total))}` : (alumno ? "Sin notas aún" : "Notas por " + nomPeriodo(yo.institucion.tipo).toLowerCase())}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>${secciones || `<div class="empty">Aún no hay ${nomPeriodos(yo.institucion.tipo)} configurados.</div>`}`);
   },  efectos() { const on = !efectosActivos(); document.documentElement.dataset.efectos = on ? "on" : "off"; guardarLocal("efectos", on ? "on" : "off"); render(); toast(on ? "Efectos visuales activados." : "Efectos visuales desactivados."); },
+  "inv-modo"(d) { invModo = d.id; conTransicion(render); },
+  async "inst-dominio"(d) {
+    const i = instDe(idNum(d)); await rpc("actualizar_dominio", { p_inst: i.id, p_dominio: $(`#dom${i.id}`).value });
+    await recargarTodo(); toast("Dominio de correo actualizado.");
+  },
+  "mas-archivo"() {
+    const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".csv,.txt,.tsv,text/plain,text/csv";
+    inp.onchange = async () => {
+      if (!inp.files[0]) return;
+      let txt = new TextDecoder("utf-8").decode(await inp.files[0].arrayBuffer());
+      if (txt.includes("\uFFFD")) txt = new TextDecoder("windows-1252").decode(await inp.files[0].arrayBuffer());   // CSV guardado desde Excel
+      $("#masTexto").value = txt.replace(/^\uFEFF/, ""); toast("Archivo cargado: pulsa «Revisar la lista».");
+    };
+    inp.click();
+  },
+  async "mas-crear"() {
+    const validas = masivo.filas.filter(f => !f.error); if (!validas.length) return;
+    if (!confirm(`¿Crear ${validas.length} cuenta(s)${yo.correo ? " y enviar las credenciales a sus correos" : ""}?`)) return;
+    const btn = document.querySelector('[data-a="mas-crear"]'); if (btn) btn.disabled = true;
+    const res = [], prog = t => { const e = $("#masProg"); if (e) e.textContent = t; };
+    try {
+      for (let i = 0; i < validas.length; i += 20) {   // por tandas de 20: la base limita cada llamada y el envío de correos va escalonado
+        const lote = validas.slice(i, i + 20); prog(`Creando ${Math.min(i + 20, validas.length)} de ${validas.length}…`);
+        const r = await rpc("crear_invitaciones_masivo", { p_items: lote.map(f => ({ nombres: f.nombres, ap1: f.ap1, ap2: f.ap2, correo: f.correo })),
+          p_rol: masivo.rol, p_docente: masivo.rol === "alumno" && masivo.docente ? masivo.docente : null, p_institucion: yo.rol === "dueno" ? instMasivo() : null });
+        r.forEach((x, k) => res.push({ ...x, correo_personal: x.correo_personal || lote[k].correo }));
+      }
+    } catch (e) { toast("Se interrumpió: " + e.message + ". Revisa «Cuentas pendientes de activar»."); }
+    masivo.resultados = res; masivo.filas = null;
+    await recargarTodo();
+  },
+  "mas-csv"() {
+    const campo = s => { s = String(s ?? ""); return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const filas = masivo.resultados.map(x => [x.nombre, x.ok ? x.usuario : "", x.ok ? (x.correo_institucional || "") : "", x.ok ? x.codigo : "", x.correo_personal || "", x.ok ? (x.enviado ? "enviado" : "creada, sin enviar") : "error: " + x.error]);
+    const csv = ["nombre", "usuario", "correo_institucional", "codigo", "correo_personal", "estado"].join(",") + "\r\n" + filas.map(f => f.map(campo).join(",")).join("\r\n") + "\r\n";
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" })); a.download = "credenciales.csv"; a.click();
+  },
+  "mas-nuevo"() { masivo = nuevoMasivo(masivo); render(); },
   "foto-elegir"() { $("#fotoIn").click(); },
   "foto-ampliar"() {
     if (!fotos[yo.id]) return;
@@ -1163,7 +1295,7 @@ const acciones = {
   async rechazar(d) { if (confirm("¿Rechazar esta solicitud?")) { await rpc("rechazar_solicitud", { p_id: idNum(d) }); await recargarTodo(); toast("Solicitud rechazada."); } },
   async "inst-guardar"(d) { const i = instDe(idNum(d)); await rpc("actualizar_institucion", { p_id: i.id, p_activa: i.activa, p_vence: $(`#vence${i.id}`).value || null }); await recargarTodo(); toast("Fecha actualizada."); },
   async "inst-toggle"(d) { const i = instDe(idNum(d)); await rpc("actualizar_institucion", { p_id: i.id, p_activa: !i.activa, p_vence: i.vence }); await recargarTodo(); toast(i.activa ? "Institución suspendida." : "Institución reactivada."); },
-  async "inst-admin"(d) { vista = "invitar"; $("#root").innerHTML = pantallaApp(); const f = $("#fInv"); if (f) { f.inst.value = d.id; f.rol.value = "admin"; actualizarFormInvitar(); } },
+  async "inst-admin"(d) { invModo = "uno"; vista = "invitar"; $("#root").innerHTML = pantallaApp(); const f = $("#fInv"); if (f) { f.inst.value = d.id; f.rol.value = "admin"; actualizarFormInvitar(); } },
   async export() {
     // Una fila por nota (codigo, nombre, periodo, curso, nota, peso); un estudiante sin notas lleva una fila con esas columnas vacías
     const campo = s => { s = String(s); return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
@@ -1237,6 +1369,11 @@ document.addEventListener("change", ev => {
   else if (t.id === "invRol" || t.id === "invInst") actualizarFormInvitar();
   else if (t.id === "perSel") { periodoSel = t.value ? Number(t.value) : null; conTransicion(render); if (detalleId) renderDetalle(); }
   else if (t.id === "perCal") repintarCal();
+  else if (t.id === "mInst" || t.id === "mRol") {
+    masivo.texto = $("#masTexto").value; masivo.orden = $("#fMas").orden.value;
+    if (t.id === "mInst") { masivo.inst = t.value; masivo.docente = ""; } else masivo.rol = t.value;
+    masivo.filas = null; render();
+  }
   else if (t.id === "fotoIn") subirFoto(t.files[0]).catch(e => toast(e.message));
 });
 
@@ -1292,10 +1429,11 @@ document.addEventListener("submit", ev => {
       await rpc("actualizar_permisos", { p_perfil: p.id, p_permisos: nuevos }); cerrarDlg(); await recargarTodo(); toast("Permisos guardados.");
     } else if (f.id === "fInv") {
       const v = await rpc("crear_invitacion", { p_rol: d.rol, p_nombres: d.nombres, p_apellidos: d.apellidos || "",
-        p_institucion: d.inst ? Number(d.inst) : null, p_docente: d.rol === "alumno" && d.docente ? d.docente : null });
+        p_institucion: d.inst ? Number(d.inst) : null, p_docente: d.rol === "alumno" && d.docente ? d.docente : null, p_correo: (d.correo || "").trim() || null });
       await recargarTodo(); mostrarCredenciales(v);
     } else if (f.id === "fInst") {
-      await rpc("crear_institucion", { p_nombre: d.nombre, p_vence: d.vence || null, p_tipo: d.tipo }); await recargarTodo(); toast("Institución creada. Ahora crea su administrador.");
+      const nuevaId = await rpc("crear_institucion", { p_nombre: d.nombre, p_vence: d.vence || null, p_tipo: d.tipo });
+      if ((d.dominio || "").trim()) await rpc("actualizar_dominio", { p_inst: nuevaId, p_dominio: d.dominio }); await recargarTodo(); toast("Institución creada. Ahora crea su administrador.");
     } else if (f.id === "fMant") {
       const pausar = !yo.mantenimiento;
       if (pausar && !confirm("¿Pausar el sistema? Nadie más que tú podrá entrar ni usarlo hasta que lo reanudes.")) return;
@@ -1305,6 +1443,16 @@ document.addEventListener("submit", ev => {
       await rpc("crear_curso", { p_nombre: d.nombre }); await recargarTodo(); toast("Curso agregado.");
     } else if (f.id === "fPeriodo") {
       await rpc("crear_periodo", { p_nombre: d.nombre }); await recargarTodo(); toast("Agregado.");
+    } else if (f.id === "fMas") {
+      Object.assign(masivo, { inst: d.inst || masivo.inst, rol: d.rol, docente: d.docente || "", orden: d.orden, texto: d.texto || "" });
+      const filas = parsearMasivo(masivo.texto, masivo.orden);
+      if (!filas.length) falla("Pega al menos una línea con un nombre completo.");
+      if (filas.length > 300) falla("Máximo 300 personas por vez: divide la lista.");
+      if (masivo.rol === "alumno" && yo.rol !== "docente" && !masivo.docente) falla("Elige el docente de estos alumnos.");
+      masivo.filas = filas; render(); setTimeout(() => { const c = document.querySelectorAll("#main > .card")[1]; if (c) c.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60);
+    } else if (f.id === "fDominio") {
+      await rpc("actualizar_dominio", { p_inst: yo.institucion.id, p_dominio: d.dominio });
+      yo = await rpc("mi_sesion"); await recargarTodo(); toast("Dominio de correo actualizado.");
     } else if (f.id === "fPerfil") {
       await rpc("actualizar_mi_perfil", { p_nombres: d.nombres, p_apellidos: d.apellidos || "" });
       yo = await rpc("mi_sesion"); await recargarTodo(); toast("Datos actualizados.");

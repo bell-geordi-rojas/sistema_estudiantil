@@ -37,6 +37,18 @@ Son ventanas que abren la web publicada (mismas cuentas, mismos datos y siempre 
 Los compila GitHub Actions (`.github/workflows/build-apps.yml`, código en `app/`) y los publica en la versión **app-latest**; se recompilan al cambiar `app/` o a mano en *Actions → Compilar programas → Run workflow*.
 El instalador de Windows no tiene firma digital (SmartScreen avisa) y el APK está firmado con clave de depuración (hay que permitir «instalar apps desconocidas»).
 
+### Correo institucional y envío de credenciales por Gmail
+
+- Cada institución puede tener un **dominio de correo** (p. ej. `uss.edu.pe`; lo define el dueño en «Instituciones» o el administrador en su pantalla de cursos). Con él, el usuario de una cuenta nueva se genera con el patrón institucional: inicial del 1.er apellido + 2.º apellido + inicial del nombre. «Bell Geordi Rojas Juarez» → `rjuarezb@uss.edu.pe`. Si ya existe se agrega un número. Se puede entrar escribiendo `rjuarezb` o el correo completo.
+  > Es el *usuario dentro de este sistema* con formato de correo institucional: no crea un buzón real en Google Workspace (eso solo lo hace el área de TI de la universidad).
+- **Registrar varios a la vez:** en «Registrar estudiante → Varios a la vez» se pega una persona por línea (`nombre completo, correo personal`), se revisa la lista y se crean todas; las credenciales se envían a cada correo personal y se puede descargar un CSV de respaldo.
+- **Conectar Gmail (una sola vez):** el correo sale desde tu Gmail con un Google Apps Script que llama la base de datos (`pg_net`), así la clave de envío nunca llega al navegador.
+  1. Entra en <https://script.google.com> → *Nuevo proyecto* → pega el contenido de [`google/correo.gs`](google/correo.gs).
+  2. Engranaje *Configuración del proyecto* → *Propiedades de la secuencia de comandos* → agrega `SECRETO` con una clave larga y privada.
+  3. *Implementar → Nueva implementación → Aplicación web*; *Ejecutar como: Yo*; *Acceso: Cualquier persona*; autoriza el envío de correos y copia la URL (termina en `/exec`).
+  4. En el SQL Editor de Supabase: `select configurar_correo('URL-COPIADA', 'LA-MISMA-CLAVE-SECRETO');`
+  Límite de Gmail: unos 100 correos por día en cuentas personales (1500 en Google Workspace); los que excedan no se envían, pero las cuentas se crean y salen en el CSV.
+
 ### Publicar una versión nueva (actualización obligatoria)
 
 1. Sube el número de `version.json` (p. ej. `1.1.0` → `1.2.0`) y haz commit/push (también se puede ejecutar a mano en *Actions → Compilar programas*).

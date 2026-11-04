@@ -53,6 +53,8 @@ create table if not exists instituciones (
   vence date,                                -- fin del alquiler (null = sin vencimiento)
   creado timestamptz not null default now()
 );
+alter table instituciones add column if not exists dominio text      -- dominio del correo institucional, p. ej. uss.edu.pe
+  check (dominio is null or dominio ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$');
 alter table instituciones add column if not exists tipo text not null default 'colegio' check (tipo in ('colegio', 'universidad'));
 
 create table if not exists perfiles (
@@ -209,6 +211,13 @@ create table if not exists invitaciones (
   creado timestamptz not null default now(),
   check ((rol = 'dueno') = (institucion_id is null))
 );
+
+-- Correo personal al que se envian las credenciales de una cuenta nueva (opcional)
+alter table invitaciones add column if not exists correo text
+  check (correo is null or (length(correo) <= 120 and correo ~* '^[^@\s]+@[^@\s]+\.[^@\s]+$'));
+
+-- El envio de credenciales usa pg_net para llamar a un Google Apps Script que manda el correo desde tu Gmail
+do $$ begin create extension if not exists pg_net; exception when others then raise notice 'pg_net no esta disponible: los correos no se enviaran automaticamente.'; end $$;
 
 -- Cada nota debe usar un curso y un periodo de la institucion del estudiante; maximo 20 por curso y periodo;
 -- el peso solo cuenta en universidades (en colegios siempre vale 1)
@@ -460,8 +469,9 @@ begin
     'id', p.id, 'usuario', p.usuario, 'nombres', p.nombres, 'apellidos', p.apellidos, 'rol', p.rol, 'foto', p.foto,
     'docente_id', p.docente_id, 'acceso', v_ok, 'motivo', v_motivo,
     'mantenimiento', en_mantenimiento(), 'mensaje_mantenimiento', (select valor from config where clave = 'mantenimiento_msg'),
+    'correo', exists (select 1 from config where clave = 'correo_url') and exists (select 1 from config where clave = 'correo_secreto'),
     'institucion', case when i.id is null then null
-                        else jsonb_build_object('id', i.id, 'nombre', i.nombre, 'slug', i.slug, 'vence', i.vence, 'tipo', i.tipo) end,
+                        else jsonb_build_object('id', i.id, 'nombre', i.nombre, 'slug', i.slug, 'vence', i.vence, 'tipo', i.tipo, 'dominio', i.dominio) end,
     'permisos', (select jsonb_object_agg(k, permiso(k)) from unnest(claves_permiso()) as k));
 end $$;
 
@@ -489,13 +499,26 @@ begin
   update perfiles set foto = nullif(trim(coalesce(p_foto, '')), '') where id = auth.uid();
 end $$;
 
-create or replace function _generar_usuario(p_nombres text, p_apellidos text) returns text language plpgsql set search_path = public as $$
-declare base text; u text; n int := 1;
+drop function if exists _generar_usuario(text, text);
+create or replace function _generar_usuario(p_nombres text, p_apellidos text, p_inst bigint default null, p_ap1 text default null, p_ap2 text default null) returns text
+language plpgsql set search_path = public as $$
+declare base text; u text; n int := 1; v_dom text; a1 text; a2 text; ap text := trim(coalesce(p_apellidos, ''));
 begin
-  base := lower(translate(left(trim(p_nombres), 1) || split_part(trim(p_apellidos), ' ', 1), 'áéíóúüñÁÉÍÓÚÜÑ', 'aeiouunaeiouun'));
+  select dominio into v_dom from instituciones where id = p_inst;
+  if v_dom is not null then
+    -- Patron institucional (ej. Bell Geordi Rojas Juarez -> rjuarezb): inicial del 1er apellido + 2do apellido + inicial del nombre
+    a1 := coalesce(nullif(trim(p_ap1), ''), split_part(ap, ' ', 1));
+    a2 := coalesce(nullif(trim(p_ap2), ''), nullif(trim(substr(ap, length(split_part(ap, ' ', 1)) + 1)), ''));
+    -- la inicial del apellido ignora particulas (de la Cruz -> c)
+    base := case when a2 is null then left(trim(p_nombres), 1) || a1
+                 else left(regexp_replace(a1, '^((de|del|la|las|los|y|san|santa|da|di|van|von)\s+)+', '', 'i'), 1) || a2 || left(trim(p_nombres), 1) end;
+  else
+    base := left(trim(p_nombres), 1) || split_part(ap, ' ', 1);
+  end if;
+  base := lower(translate(base, 'áéíóúüñÁÉÍÓÚÜÑ', 'aeiouunaeiouun'));
   base := regexp_replace(base, '[^a-z0-9]', '', 'g');
   if length(base) < 3 then base := base || 'usr'; end if;
-  base := left(base, 24);
+  base := left(base, 26);
   u := base;
   while exists (select 1 from perfiles where usuario = u) or exists (select 1 from invitaciones where usuario = u) loop
     n := n + 1; u := base || n;
@@ -503,11 +526,30 @@ begin
   return u;
 end $$;
 
-create or replace function _crear_invitacion(p_rol rol_usuario, p_nombres text, p_apellidos text, p_inst bigint, p_docente uuid, p_creador uuid)
-returns jsonb language plpgsql security definer set search_path = public, extensions as $$
-declare v_usuario text; v_codigo text; v_est bigint; v_cod_est text; base text; n int := 1;
+-- Envia las credenciales al correo personal (Gmail) mediante el Apps Script configurado con configurar_correo(); nunca rompe la creacion de la cuenta
+create or replace function _enviar_credenciales(p_correo text, p_nombre text, p_correo_inst text, p_usuario text, p_codigo text, p_inst bigint, p_rol text) returns boolean
+language plpgsql security definer set search_path = public as $$
+declare v_url text; v_sec text; v_nom text;
 begin
-  v_usuario := _generar_usuario(p_nombres, p_apellidos);
+  select valor into v_url from config where clave = 'correo_url';
+  select valor into v_sec from config where clave = 'correo_secreto';
+  if v_url is null or v_sec is null or p_correo is null then return false; end if;
+  select nombre into v_nom from instituciones where id = p_inst;
+  perform net.http_post(url := v_url, headers := jsonb_build_object('Content-Type', 'application/json'),
+    body := jsonb_build_object('secreto', v_sec, 'para', p_correo, 'nombre', p_nombre, 'correo_institucional', p_correo_inst,
+                               'usuario', p_usuario, 'codigo', p_codigo, 'institucion', v_nom, 'rol', p_rol,
+                               'app', 'https://bell786u-ctrl.github.io/sistema_estudiantil/'));
+  return true;
+exception when others then
+  return false;
+end $$;
+
+drop function if exists _crear_invitacion(rol_usuario, text, text, bigint, uuid, uuid);
+create or replace function _crear_invitacion(p_rol rol_usuario, p_nombres text, p_apellidos text, p_inst bigint, p_docente uuid, p_creador uuid, p_correo text default null, p_ap1 text default null, p_ap2 text default null)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare v_usuario text; v_codigo text; v_est bigint; v_cod_est text; base text; n int := 1; v_dom text; v_ci text; v_env boolean := false;
+begin
+  v_usuario := _generar_usuario(p_nombres, p_apellidos, p_inst, p_ap1, p_ap2);
   v_codigo := upper(substr(encode(gen_random_bytes(8), 'hex'), 1, 10));
   if p_rol = 'alumno' then
     base := left(upper(v_usuario), 13);
@@ -518,22 +560,31 @@ begin
     insert into estudiantes (institucion_id, docente_id, codigo, nombre)
       values (p_inst, p_docente, v_cod_est, trim(p_nombres || ' ' || p_apellidos)) returning id into v_est;
   end if;
-  insert into invitaciones (institucion_id, rol, nombres, apellidos, usuario, codigo_hash, docente_id, estudiante_id, creado_por)
-    values (p_inst, p_rol, trim(p_nombres), trim(p_apellidos), v_usuario, crypt(v_codigo, gen_salt('bf')), p_docente, v_est, p_creador);
-  return jsonb_build_object('usuario', v_usuario, 'codigo', v_codigo, 'rol', p_rol);
+  insert into invitaciones (institucion_id, rol, nombres, apellidos, usuario, codigo_hash, docente_id, estudiante_id, creado_por, correo)
+    values (p_inst, p_rol, trim(p_nombres), trim(p_apellidos), v_usuario, crypt(v_codigo, gen_salt('bf')), p_docente, v_est, p_creador, nullif(trim(coalesce(p_correo, '')), ''));
+  select dominio into v_dom from instituciones where id = p_inst;
+  if v_dom is not null then v_ci := v_usuario || '@' || v_dom; end if;
+  if nullif(trim(coalesce(p_correo, '')), '') is not null then
+    v_env := _enviar_credenciales(trim(p_correo), trim(p_nombres || ' ' || p_apellidos), v_ci, v_usuario, v_codigo, p_inst, p_rol::text);
+  end if;
+  return jsonb_build_object('usuario', v_usuario, 'codigo', v_codigo, 'rol', p_rol, 'correo_institucional', v_ci,
+                            'correo_personal', nullif(trim(coalesce(p_correo, '')), ''), 'enviado', v_env);
 end $$;
 
 -- Crea una cuenta pendiente de activar; devuelve usuario + codigo (el codigo solo se ve ahora)
-create or replace function crear_invitacion(p_rol text, p_nombres text, p_apellidos text, p_institucion bigint default null, p_docente uuid default null)
+drop function if exists crear_invitacion(text, text, text, bigint, uuid);
+create or replace function crear_invitacion(p_rol text, p_nombres text, p_apellidos text, p_institucion bigint default null, p_docente uuid default null, p_correo text default null, p_ap1 text default null, p_ap2 text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare r rol_usuario := mi_rol(); v_rol rol_usuario; v_inst bigint; v_doc uuid;
 begin
   if r is null then raise exception 'No autorizado.'; end if;
   p_nombres := trim(coalesce(p_nombres, ''));
   p_apellidos := trim(coalesce(p_apellidos, ''));
-  if p_nombres = '' or p_nombres ~ '[0-9|]' or p_apellidos ~ '[0-9|]' or length(p_nombres || p_apellidos) > 100 then
+  if p_nombres = '' or p_nombres ~ '[0-9|]' or p_apellidos ~ '[0-9|]' or coalesce(p_ap1, '') ~ '[0-9|]' or coalesce(p_ap2, '') ~ '[0-9|]' or length(p_nombres || p_apellidos) > 100 then
     raise exception 'Nombres invalidos (sin numeros).';
   end if;
+  p_correo := nullif(lower(trim(coalesce(p_correo, ''))), '');
+  if p_correo is not null and (length(p_correo) > 120 or p_correo !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$') then raise exception 'Correo personal invalido.'; end if;
   if p_rol not in ('admin', 'docente', 'alumno') then raise exception 'Rol invalido.'; end if;
   v_rol := p_rol::rol_usuario;
   if r = 'dueno' then
@@ -554,7 +605,29 @@ begin
   else
     v_doc := null;
   end if;
-  return _crear_invitacion(v_rol, p_nombres, p_apellidos, v_inst, v_doc, auth.uid());
+  return _crear_invitacion(v_rol, p_nombres, p_apellidos, v_inst, v_doc, auth.uid(), p_correo, p_ap1, p_ap2);
+end $$;
+
+-- Varias cuentas a la vez: [{nombres, ap1, ap2, correo}]. Devuelve una fila por cuenta (credenciales o el motivo del error);
+-- un error en una fila no frena las demas. Maximo 30 por llamada (la web envia por tandas).
+create or replace function crear_invitaciones_masivo(p_items jsonb, p_rol text, p_docente uuid default null, p_institucion bigint default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare x jsonb; r jsonb := '[]'::jsonb; v jsonb; v_nom text;
+begin
+  if mi_rol() is null then raise exception 'No autorizado.'; end if;
+  if p_items is null or jsonb_typeof(p_items) <> 'array' then raise exception 'Formato invalido.'; end if;
+  if jsonb_array_length(p_items) > 30 then raise exception 'Maximo 30 cuentas por envio.'; end if;
+  for x in select * from jsonb_array_elements(p_items) loop
+    v_nom := trim(coalesce(x ->> 'nombres', '') || ' ' || coalesce(x ->> 'ap1', '') || ' ' || coalesce(x ->> 'ap2', ''));
+    begin
+      v := crear_invitacion(p_rol, x ->> 'nombres', trim(coalesce(x ->> 'ap1', '') || ' ' || coalesce(x ->> 'ap2', '')),
+                            p_institucion, p_docente, x ->> 'correo', x ->> 'ap1', x ->> 'ap2');
+      r := r || jsonb_build_array(v || jsonb_build_object('ok', true, 'nombre', v_nom));
+    exception when others then
+      r := r || jsonb_build_array(jsonb_build_object('ok', false, 'nombre', v_nom, 'error', sqlerrm));
+    end;
+  end loop;
+  return r;
 end $$;
 
 create or replace function _puede_resolver_solicitud(s solicitudes) returns boolean language sql stable security definer set search_path = public as $$
@@ -601,14 +674,19 @@ create or replace function _puede_invitacion(inv invitaciones) returns boolean l
 
 create or replace function regenerar_codigo(p_id bigint) returns jsonb
 language plpgsql security definer set search_path = public, extensions as $$
-declare inv invitaciones; v_codigo text;
+declare inv invitaciones; v_codigo text; v_dom text; v_ci text; v_env boolean := false;
 begin
   select * into inv from invitaciones where id = p_id and not usado for update;
   if not found then raise exception 'Invitacion no encontrada.'; end if;
   if not _puede_invitacion(inv) then raise exception 'No autorizado.'; end if;
   v_codigo := upper(substr(encode(gen_random_bytes(8), 'hex'), 1, 10));
   update invitaciones set codigo_hash = crypt(v_codigo, gen_salt('bf')) where id = p_id;
-  return jsonb_build_object('usuario', inv.usuario, 'codigo', v_codigo, 'rol', inv.rol);
+  select dominio into v_dom from instituciones where id = inv.institucion_id;
+  if v_dom is not null then v_ci := inv.usuario || '@' || v_dom; end if;
+  if inv.correo is not null then   -- si se registro un correo personal, el codigo nuevo se reenvia ahi
+    v_env := _enviar_credenciales(inv.correo, trim(inv.nombres || ' ' || inv.apellidos), v_ci, inv.usuario, v_codigo, inv.institucion_id, inv.rol::text);
+  end if;
+  return jsonb_build_object('usuario', inv.usuario, 'codigo', v_codigo, 'rol', inv.rol, 'correo_institucional', v_ci, 'correo_personal', inv.correo, 'enviado', v_env);
 end $$;
 
 create or replace function eliminar_invitacion(p_id bigint) returns void
@@ -637,6 +715,19 @@ begin
   insert into instituciones (nombre, slug, vence, tipo) values (p_nombre, v_slug, p_vence, p_tipo) returning id into v_id;
   perform _sembrar_institucion(v_id);
   return v_id;
+end $$;
+
+-- Dominio del correo institucional (p. ej. uss.edu.pe): lo define el dueno o el administrador de esa institucion
+create or replace function actualizar_dominio(p_inst bigint, p_dominio text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not (mi_rol() = 'dueno' or (mi_rol() = 'admin' and p_inst = mi_inst())) then raise exception 'No autorizado.'; end if;
+  p_dominio := regexp_replace(lower(trim(coalesce(p_dominio, ''))), '^@', '');
+  if p_dominio <> '' and p_dominio !~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$' then
+    raise exception 'Dominio invalido (ejemplo: uss.edu.pe).';
+  end if;
+  update instituciones set dominio = nullif(p_dominio, '') where id = p_inst;
+  if not found then raise exception 'Institucion no encontrada.'; end if;
 end $$;
 
 -- Colegio <-> universidad (al volver a colegio, todos los pesos quedan en 1)
@@ -905,6 +996,17 @@ end $$;
 -- ---------------------------------------------------------------------------
 -- 10. Primera cuenta: el dueno (se ejecuta una vez, a mano, con TU usuario y TU codigo secreto)
 -- ---------------------------------------------------------------------------
+-- Conecta el envio de correos (se ejecuta una sola vez, a mano, desde el SQL Editor):
+--   select configurar_correo('https://script.google.com/macros/s/XXXX/exec', 'el-secreto-del-script');
+create or replace function configurar_correo(p_url text, p_secreto text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce(p_url, '') !~ '^https://script\.google\.com/' then raise exception 'La URL debe ser la de tu Apps Script (https://script.google.com/...).'; end if;
+  if length(coalesce(p_secreto, '')) < 12 then raise exception 'El secreto debe tener al menos 12 caracteres.'; end if;
+  insert into config (clave, valor) values ('correo_url', trim(p_url)) on conflict (clave) do update set valor = excluded.valor;
+  insert into config (clave, valor) values ('correo_secreto', p_secreto) on conflict (clave) do update set valor = excluded.valor;
+end $$;
+
 create or replace function crear_invitacion_dueno(p_usuario text, p_nombres text, p_codigo text) returns void
 language plpgsql security definer set search_path = public, extensions as $$
 begin
@@ -928,7 +1030,7 @@ begin
              'actualizar_institucion', 'actualizar_permisos', 'actualizar_estado_perfil', 'restablecer_contrasena',
              'cambiar_rol', 'eliminar_cuenta', 'regenerar_codigo', 'eliminar_invitacion', 'registrar_estudiante', 'actualizar_estudiante', 'reasignar_docente',
              'eliminar_estudiante', 'agregar_nota', 'actualizar_nota', 'eliminar_nota',
-             'cambiar_tipo_institucion', 'eliminar_institucion', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
+             'cambiar_tipo_institucion', 'eliminar_institucion', 'crear_invitaciones_masivo', 'actualizar_dominio', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
              'crear_periodo', 'renombrar_periodo', 'eliminar_periodo', 'actualizar_mi_perfil', 'actualizar_mi_foto'])
   loop
     execute format('revoke all on function %s from public, anon', f);
@@ -938,7 +1040,7 @@ begin
   for f in select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname = any (array[
              '_generar_usuario', '_crear_invitacion', '_puede_resolver_solicitud', '_puede_invitacion', '_puedo_gestionar', '_alcance_perfil', 'crear_invitacion_dueno',
-             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario'])
+             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario', '_enviar_credenciales', 'configurar_correo'])
   loop
     execute format('revoke all on function %s from public, anon, authenticated', f);
   end loop;
