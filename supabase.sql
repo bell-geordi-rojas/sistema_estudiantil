@@ -55,6 +55,8 @@ create table if not exists instituciones (
 );
 alter table instituciones add column if not exists dominio text      -- dominio del correo institucional, p. ej. midominio.edu
   check (dominio is null or dominio ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$');
+-- Si esta activa, al registrar a alguien tambien se crea su cuenta REAL de Google Workspace (usuario@dominio) con el script de la institucion
+alter table instituciones add column if not exists google_workspace boolean not null default false;
 alter table instituciones add column if not exists tipo text not null default 'colegio' check (tipo in ('colegio', 'universidad'));
 
 create table if not exists perfiles (
@@ -482,7 +484,8 @@ begin
               or (exists (select 1 from config where clave = 'correo_url') and exists (select 1 from config where clave = 'correo_secreto')),
     'institucion', case when i.id is null then null
                         else jsonb_build_object('id', i.id, 'nombre', i.nombre, 'slug', i.slug, 'vence', i.vence, 'tipo', i.tipo, 'dominio', i.dominio,
-                                                  'correo_propio', exists (select 1 from instituciones_correo where institucion_id = i.id)) end,
+                                                  'correo_propio', exists (select 1 from instituciones_correo where institucion_id = i.id),
+                                                  'google', i.google_workspace) end,
     'permisos', (select jsonb_object_agg(k, permiso(k)) from unnest(claves_permiso()) as k));
 end $$;
 
@@ -538,20 +541,25 @@ begin
 end $$;
 
 -- Envia las credenciales al correo personal (Gmail) mediante el Apps Script configurado con configurar_correo(); nunca rompe la creacion de la cuenta
-create or replace function _enviar_credenciales(p_correo text, p_nombre text, p_correo_inst text, p_usuario text, p_codigo text, p_inst bigint, p_rol text) returns boolean
+drop function if exists _enviar_credenciales(text, text, text, text, text, bigint, text);
+create or replace function _enviar_credenciales(p_correo text, p_nombre text, p_correo_inst text, p_usuario text, p_codigo text, p_inst bigint, p_rol text,
+                                                p_nombres text default null, p_apellidos text default null, p_clave_google text default null) returns boolean
 language plpgsql security definer set search_path = public as $$
-declare v_url text; v_sec text; v_nom text;
+declare v_url text; v_sec text; v_nom text; v_propio boolean;
 begin
   select url, secreto into v_url, v_sec from instituciones_correo where institucion_id = p_inst;   -- cuenta de Google de la propia institucion
+  v_propio := v_url is not null;
   if v_url is null then
     select valor into v_url from config where clave = 'correo_url';                                -- si no, la conexion general del sistema (si el dueno la configuro)
     select valor into v_sec from config where clave = 'correo_secreto';
   end if;
-  if v_url is null or v_sec is null or p_correo is null then return false; end if;
+  if v_url is null or v_sec is null or (p_correo is null and p_clave_google is null) then return false; end if;
   select nombre into v_nom from instituciones where id = p_inst;
   perform net.http_post(url := v_url, headers := jsonb_build_object('Content-Type', 'application/json'),
-    body := jsonb_build_object('secreto', v_sec, 'para', p_correo, 'nombre', p_nombre, 'correo_institucional', p_correo_inst,
-                               'usuario', p_usuario, 'codigo', p_codigo, 'institucion', v_nom, 'rol', p_rol,
+    body := jsonb_build_object('secreto', v_sec, 'para', p_correo, 'nombre', p_nombre, 'nombres', p_nombres, 'apellidos', p_apellidos,
+                               'correo_institucional', p_correo_inst, 'usuario', p_usuario, 'codigo', p_codigo, 'institucion', v_nom, 'rol', p_rol,
+                               'crear_google', (p_clave_google is not null and v_propio),   -- la cuenta de Google solo se crea con el script de la propia institucion
+                               'clave_google', case when v_propio then p_clave_google end,
                                'app', 'https://bell786u-ctrl.github.io/sistema_estudiantil/'));
   return true;
 exception when others then
@@ -561,7 +569,7 @@ end $$;
 drop function if exists _crear_invitacion(rol_usuario, text, text, bigint, uuid, uuid);
 create or replace function _crear_invitacion(p_rol rol_usuario, p_nombres text, p_apellidos text, p_inst bigint, p_docente uuid, p_creador uuid, p_correo text default null, p_ap1 text default null, p_ap2 text default null)
 returns jsonb language plpgsql security definer set search_path = public, extensions as $$
-declare v_usuario text; v_codigo text; v_est bigint; v_cod_est text; base text; n int := 1; v_dom text; v_ci text; v_env boolean := false;
+declare v_usuario text; v_codigo text; v_est bigint; v_cod_est text; base text; n int := 1; v_dom text; v_ci text; v_env boolean := false; v_gw boolean; v_cg text;
 begin
   v_usuario := _generar_usuario(p_nombres, p_apellidos, p_inst, p_ap1, p_ap2);
   v_codigo := upper(substr(encode(gen_random_bytes(8), 'hex'), 1, 10));
@@ -576,13 +584,18 @@ begin
   end if;
   insert into invitaciones (institucion_id, rol, nombres, apellidos, usuario, codigo_hash, docente_id, estudiante_id, creado_por, correo)
     values (p_inst, p_rol, trim(p_nombres), trim(p_apellidos), v_usuario, crypt(v_codigo, gen_salt('bf')), p_docente, v_est, p_creador, nullif(trim(coalesce(p_correo, '')), ''));
-  select dominio into v_dom from instituciones where id = p_inst;
+  select dominio, google_workspace into v_dom, v_gw from instituciones where id = p_inst;
   if v_dom is not null then v_ci := v_usuario || '@' || v_dom; end if;
-  if nullif(trim(coalesce(p_correo, '')), '') is not null then
-    v_env := _enviar_credenciales(trim(p_correo), trim(p_nombres || ' ' || p_apellidos), v_ci, v_usuario, v_codigo, p_inst, p_rol::text);
+  -- Cuenta real de Google Workspace: contrasena temporal aleatoria (Google pedira cambiarla al primer ingreso)
+  if v_gw and v_dom is not null and exists (select 1 from instituciones_correo where institucion_id = p_inst) then
+    v_cg := translate(encode(gen_random_bytes(9), 'base64'), '+/', 'Ab') || '7';
+  end if;
+  if nullif(trim(coalesce(p_correo, '')), '') is not null or v_cg is not null then
+    v_env := _enviar_credenciales(nullif(trim(coalesce(p_correo, '')), ''), trim(p_nombres || ' ' || p_apellidos), v_ci, v_usuario, v_codigo, p_inst, p_rol::text,
+                                  trim(p_nombres), trim(p_apellidos), v_cg);
   end if;
   return jsonb_build_object('usuario', v_usuario, 'codigo', v_codigo, 'rol', p_rol, 'correo_institucional', v_ci,
-                            'correo_personal', nullif(trim(coalesce(p_correo, '')), ''), 'enviado', v_env);
+                            'correo_personal', nullif(trim(coalesce(p_correo, '')), ''), 'enviado', v_env, 'clave_google', v_cg);
 end $$;
 
 -- Crea una cuenta pendiente de activar; devuelve usuario + codigo (el codigo solo se ve ahora)
@@ -1032,6 +1045,23 @@ declare v_inst bigint;
 begin
   if mi_rol() = 'dueno' then v_inst := p_inst; elsif mi_rol() = 'admin' then v_inst := mi_inst(); else raise exception 'No autorizado.'; end if;
   delete from instituciones_correo where institucion_id = v_inst;
+  update instituciones set google_workspace = false where id = v_inst;
+end $$;
+
+-- Activa/desactiva la creacion automatica de cuentas reales de Google Workspace (requiere dominio y la conexion propia de la institucion)
+create or replace function actualizar_cuentas_google(p_activo boolean, p_inst bigint default null) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_inst bigint;
+begin
+  if mi_rol() = 'dueno' then v_inst := p_inst; elsif mi_rol() = 'admin' then v_inst := mi_inst(); else raise exception 'No autorizado.'; end if;
+  if p_activo and not exists (select 1 from instituciones where id = v_inst and dominio is not null) then
+    raise exception 'Primero define el dominio de correo de la institucion.';
+  end if;
+  if p_activo and not exists (select 1 from instituciones_correo where institucion_id = v_inst) then
+    raise exception 'Primero conecta la cuenta de Google de la institucion (administradora de Google Workspace).';
+  end if;
+  update instituciones set google_workspace = coalesce(p_activo, false) where id = v_inst;
+  if not found then raise exception 'Institucion no encontrada.'; end if;
 end $$;
 
 -- Manda un correo de prueba a p_correo con la conexion de la institucion del administrador
@@ -1080,7 +1110,7 @@ begin
              'actualizar_institucion', 'actualizar_permisos', 'actualizar_estado_perfil', 'restablecer_contrasena',
              'cambiar_rol', 'eliminar_cuenta', 'regenerar_codigo', 'eliminar_invitacion', 'registrar_estudiante', 'actualizar_estudiante', 'reasignar_docente',
              'eliminar_estudiante', 'agregar_nota', 'actualizar_nota', 'eliminar_nota',
-             'cambiar_tipo_institucion', 'eliminar_institucion', 'crear_invitaciones_masivo', 'actualizar_dominio', 'configurar_correo_institucion', 'quitar_correo_institucion', 'probar_correo', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
+             'cambiar_tipo_institucion', 'eliminar_institucion', 'crear_invitaciones_masivo', 'actualizar_dominio', 'configurar_correo_institucion', 'quitar_correo_institucion', 'probar_correo', 'actualizar_cuentas_google', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
              'crear_periodo', 'renombrar_periodo', 'eliminar_periodo', 'actualizar_mi_perfil', 'actualizar_mi_foto'])
   loop
     execute format('revoke all on function %s from public, anon', f);

@@ -225,17 +225,22 @@ const EMAIL_DOMINIO = "acceso.estudiantil.app"; // correo interno de las cuentas
 const NOTA_MIN = 0, NOTA_MAX = 20, NOTA_APROBACION = 11, MAX_NOTAS = 20;
 // Codigo del Apps Script que cada institucion publica en su cuenta de Google (igual que google/correo.gs)
 const SCRIPT_CORREO = String.raw`/**
- * Envío de credenciales por Gmail para el sistema Estudiantil.
+ * Envío de credenciales por Gmail (y creación opcional de cuentas de Google Workspace) para el sistema Estudiantil.
  *
- * La base de datos (Supabase) llama a esta aplicación web cada vez que se crea una cuenta con correo personal.
- * Los correos salen desde la cuenta de Google con la que publiques este script.
+ * La base de datos (Supabase) llama a esta aplicación web cada vez que se registra a alguien. El correo sale desde la
+ * cuenta de Google que publica este script (la del director o la institucional).
  *
- * Instalación (una sola vez), ver README.md:
+ * Si la institución usa Google Workspace y activa «Crear también la cuenta de Google», este mismo script crea la cuenta
+ * REAL (usuario@dominio) con una contraseña temporal. Para eso la cuenta que lo publica debe ser administradora de
+ * Workspace (con permiso para administrar usuarios) y debes activar el servicio «Admin SDK API» (ver README).
+ *
+ * Instalación (una sola vez):
  *   1. script.google.com > Nuevo proyecto > pega este archivo.
- *   2. Configuración del proyecto (engranaje) > Propiedades de la secuencia de comandos > agrega  SECRETO = una clave larga y privada.
- *   3. Implementar > Nueva implementación > Aplicación web > Ejecutar como: Yo > Quién tiene acceso: Cualquier persona > Implementar (autoriza el envío de correos).
- *   4. Copia la URL que termina en /exec y ejecútala en el SQL Editor de Supabase:
- *        select configurar_correo('URL-COPIADA', 'LA-MISMA-CLAVE-DE-SECRETO');
+ *   2. Configuración del proyecto > Propiedades de la secuencia de comandos > agrega  SECRETO = una clave larga y privada.
+ *   3. (Solo para crear cuentas de Workspace) Servicios (+) > «Admin SDK API» > Agregar.
+ *   4. Implementar > Nueva implementación > Aplicación web > Ejecutar como: Yo > Acceso: Cualquier persona.
+ *      Si cambias el código más adelante: Implementar > Administrar implementaciones > editar > Nueva versión.
+ *   5. Pega la URL (termina en /exec) y la clave en la pantalla «Correo institucional» del sistema.
  */
 
 function doPost(e) {
@@ -243,29 +248,43 @@ function doPost(e) {
     const d = JSON.parse(e.postData.contents);
     const secreto = PropertiesService.getScriptProperties().getProperty("SECRETO");
     if (!secreto || d.secreto !== secreto) return respuesta("no autorizado");
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(d.para || "")) return respuesta("correo invalido");
+
+    // 1) Cuenta real de Google Workspace (opcional)
+    const cuenta = d.crear_google ? crearCuentaGoogle(d) : null;
+
+    // 2) Correo con las credenciales (si hay correo personal)
+    if (!d.para) return respuesta(cuenta && cuenta.ok ? "cuenta creada" : "sin destinatario");
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(d.para)) return respuesta("correo invalido");
 
     const inst = limpiar(d.institucion) || "tu institución";
     const rol = { alumno: "estudiante", docente: "docente", admin: "administrador" }[d.rol] || "usuario";
     const acceso = limpiar(d.correo_institucional) || limpiar(d.usuario);
     const app = /^https:\/\//.test(d.app || "") ? d.app : "";
 
+    let filas = fila("Usuario", acceso) +
+      fila("Código de activación", '<span style="font-size:20px;font-weight:700;letter-spacing:2px">' + limpiar(d.codigo) + '</span>');
+    let aviso = "";
+    let textoGoogle = "";
+    if (cuenta && cuenta.ok) {
+      filas += fila("Cuenta de Google", limpiar(cuenta.correo)) +
+        fila("Contraseña temporal de Google", '<span style="font-size:18px;font-weight:700;letter-spacing:1px">' + limpiar(d.clave_google) + '</span>');
+      aviso = '<p style="background:#fef3c7;padding:10px;border-radius:6px;font-size:14px">Tu cuenta de Google institucional ya existe: entra en <a href="https://mail.google.com">mail.google.com</a> con ese correo y la contraseña temporal. Google te pedirá cambiarla.</p>';
+      textoGoogle = "\nCuenta de Google: " + cuenta.correo + "\nContraseña temporal de Google: " + d.clave_google + " (Google te pedirá cambiarla)";
+    }
+
     const html =
       '<div style="font-family:Segoe UI,Arial,sans-serif;max-width:520px;margin:auto;color:#1f2937">' +
       '<h2 style="color:#0e9aa7;margin-bottom:4px">Estudiantil</h2>' +
       '<p>Hola <b>' + limpiar(d.nombre) + '</b>,</p>' +
       '<p>' + inst + ' creó tu cuenta de <b>' + rol + '</b>. Estas son tus credenciales de acceso:</p>' +
-      '<table style="border-collapse:collapse;margin:12px 0">' +
-      fila("Usuario", acceso) +
-      fila("Código de activación", '<span style="font-size:20px;font-weight:700;letter-spacing:2px">' + limpiar(d.codigo) + '</span>') +
-      '</table>' +
+      '<table style="border-collapse:collapse;margin:12px 0">' + filas + '</table>' + aviso +
       '<ol style="line-height:1.7"><li>Abre el sistema' + (app ? ' (<a href="' + app + '">' + app + '</a>)' : '') + ' o la app.</li>' +
       '<li>Entra en <b>Activar cuenta</b>.</li>' +
       '<li>Escribe tu usuario (' + limpiar(d.usuario) + ') y el código, y elige tu contraseña.</li></ol>' +
       '<p style="color:#6b7280;font-size:13px">El código es de un solo uso. Si no esperabas este mensaje, ignóralo.</p></div>';
 
-    const texto = "Hola " + d.nombre + ",\n" + inst + " creó tu cuenta de " + rol + ".\n\nUsuario: " + acceso +
-      "\nCódigo de activación: " + d.codigo + "\n\nEntra en 'Activar cuenta' " + (app ? "en " + app + " " : "") +
+    const texto = "Hola " + d.nombre + ",\n" + inst + " creó tu cuenta de " + rol + ".\n\nUsuario: " + (d.correo_institucional || d.usuario) +
+      "\nCódigo de activación: " + d.codigo + textoGoogle + "\n\nEntra en 'Activar cuenta' " + (app ? "en " + app + " " : "") +
       "con tu usuario (" + d.usuario + ") y el código, y elige tu contraseña. El código es de un solo uso.";
 
     MailApp.sendEmail({ to: d.para, subject: "Tus credenciales de acceso - " + inst, body: texto, htmlBody: html, name: "Estudiantil" });
@@ -273,6 +292,42 @@ function doPost(e) {
   } catch (err) {
     return respuesta("error: " + err);
   }
+}
+
+/** Crea la cuenta de Google Workspace usuario@dominio con contraseña temporal. Nunca lanza: avisa al director si falla. */
+function crearCuentaGoogle(d) {
+  const correo = String(d.correo_institucional || "").toLowerCase();
+  try {
+    const yo = Session.getEffectiveUser().getEmail().toLowerCase();
+    const dominio = yo.split("@")[1];
+    if (!/^[a-z0-9._'-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(correo)) throw new Error("correo institucional no válido: " + correo);
+    // Solo se crean cuentas del dominio de la cuenta que publicó el script (evita usos indebidos)
+    if (correo.split("@")[1] !== dominio) throw new Error("el dominio de " + correo + " no coincide con el de la cuenta que publicó el script (" + dominio + ")");
+    if (String(d.clave_google || "").length < 8) throw new Error("falta la contraseña temporal");
+    const nombres = String(d.nombres || d.nombre || "").trim() || "Usuario";
+    const apellidos = String(d.apellidos || "").trim() || "-";
+    try {
+      AdminDirectory.Users.insert({
+        primaryEmail: correo,
+        name: { givenName: nombres, familyName: apellidos },
+        password: d.clave_google,
+        changePasswordAtNextLogin: true
+      });
+    } catch (err) {
+      if (/already exists/i.test(String(err))) { avisarAlDirector("La cuenta " + correo + " ya existía", "No se creó otra. Si es una persona distinta, regístrala con otro usuario."); return { ok: false, existe: true, correo: correo }; }
+      throw err;
+    }
+    return { ok: true, correo: correo };
+  } catch (err) {
+    avisarAlDirector("No se pudo crear la cuenta de Google " + correo,
+      String(err) + "\n\nComprueba que: (1) este script lo publicó una cuenta administradora de Google Workspace, (2) agregaste el servicio «Admin SDK API» en el editor de Apps Script, " +
+      "y (3) el acceso a la API está permitido en la consola de administración (Seguridad > Controles de API).");
+    return { ok: false, error: String(err), correo: correo };
+  }
+}
+
+function avisarAlDirector(asunto, detalle) {
+  try { MailApp.sendEmail(Session.getEffectiveUser().getEmail(), "[Estudiantil] " + asunto, detalle); } catch (e) {}
 }
 
 // Respuesta de prueba al abrir la URL en el navegador
@@ -920,14 +975,14 @@ function vistaPreviaMasivo(dom) {
     <div class="bar"><button class="btn" data-a="mas-crear" ${validas.length ? "" : "disabled"}>Crear ${validas.length} cuenta(s)${yo.correo ? " y enviar las credenciales" : ""}</button><span id="masProg" style="color:var(--mute)"></span></div></div>`;
 }
 function resultadosMasivo() {
-  const r = masivo.resultados, ok = r.filter(x => x.ok), env = ok.filter(x => x.enviado), fallos = r.filter(x => !x.ok);
+  const r = masivo.resultados, ok = r.filter(x => x.ok), env = ok.filter(x => x.enviado && x.correo_personal), fallos = r.filter(x => !x.ok), conG = r.some(x => x.clave_google);
   return `<div class="card"><h2>Resultado del registro</h2><div class="kpis"><div class="kpi"><span>Cuentas creadas</span><b style="color:var(--green)">${ok.length}</b></div>
     <div class="kpi"><span>Correos enviados</span><b>${env.length}</b></div><div class="kpi"><span>Con error</span><b style="color:${fallos.length ? "var(--red)" : "inherit"}">${fallos.length}</b></div></div>
     ${!yo.correo ? `<p class="msg warn">El envío de correos no está conectado: entrega las credenciales con el CSV.</p>` : ok.length > env.length ? `<p class="msg warn">${ok.length - env.length} cuenta(s) se crearon sin enviar correo (no tenían correo personal o el envío falló): sus credenciales están en el CSV.</p>` : ""}
     <p class="msg warn">Los códigos de activación solo se muestran ahora. Descarga el CSV antes de salir de esta pantalla.</p>
     <div class="bar"><button class="btn" data-a="mas-csv">⇩ Descargar CSV con las credenciales</button><button class="btn sec" data-a="mas-nuevo">Registrar más personas</button></div>
-    <div class="scroll"><table><thead><tr><th>Nombre</th><th>Usuario</th><th>Código</th><th>Correo personal</th><th>Estado</th></tr></thead><tbody>` +
-    r.map(x => `<tr><td>${esc(x.nombre)}</td><td>${x.ok ? `<code>${esc(x.correo_institucional || x.usuario)}</code>` : "—"}</td><td>${x.ok ? `<code>${esc(x.codigo)}</code>` : "—"}</td><td>${x.correo_personal ? esc(x.correo_personal) : "<small>—</small>"}</td>
+    <div class="scroll"><table><thead><tr><th>Nombre</th><th>Usuario</th><th>Código</th>${conG ? "<th>Contraseña de Google</th>" : ""}<th>Correo personal</th><th>Estado</th></tr></thead><tbody>` +
+    r.map(x => `<tr><td>${esc(x.nombre)}</td><td>${x.ok ? `<code>${esc(x.correo_institucional || x.usuario)}</code>` : "—"}</td><td>${x.ok ? `<code>${esc(x.codigo)}</code>` : "—"}</td>${conG ? `<td>${x.ok && x.clave_google ? `<code>${esc(x.clave_google)}</code>` : "—"}</td>` : ""}<td>${x.correo_personal ? esc(x.correo_personal) : "<small>—</small>"}</td>
       <td>${x.ok ? (x.enviado ? `<span class="pill ok">Enviado</span>` : `<span class="pill na">Creada, sin enviar</span>`) : `<span class="pill no" style="white-space:normal">${esc(x.error)}</span>`}</td></tr>`).join("") + `</tbody></table></div></div>`;
 }
 function vInvitar(pre = {}) {
@@ -1024,7 +1079,15 @@ function vCorreo() {
     <label>URL de la aplicación web (termina en /exec)<input name="url" required autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec"></label>
     <div class="err"></div><div class="bar"><button class="btn">Guardar conexión</button>${propio ? `<button type="button" class="btn del" data-a="correo-quitar">Quitar conexión</button>` : ""}</div></form>
     ${yo.correo ? `<form class="bar" id="fPrueba" style="margin-top:14px"><input type="email" name="correo" required placeholder="Tu correo, para recibir una prueba" style="flex:1;min-width:220px"><button class="btn sec">Enviar correo de prueba</button></form><div class="err"></div>` : ""}</div>`;
-  return domCard + gmail;
+  const googleCard = `<div class="card"><h2>Cuentas reales de Google Workspace ${inst.google ? `<span class="pill ok">Activado</span>` : `<span class="pill na">Desactivado</span>`}</h2>
+    <p style="margin-top:0;color:var(--mute)">Las cuentas que crea el sistema (<code>usuario@${esc(inst.dominio || "tu-dominio")}</code>) son <b>internas</b>: sirven para entrar aquí, pero no son buzones de Google. Si tu institución usa <b>Google Workspace</b> con su propio dominio, el sistema puede crear además la cuenta <b>real</b> de Google de cada persona (con Gmail y Drive) y enviarle su contraseña temporal junto con el código de activación.</p>
+    <p class="msg warn">Requisitos: Google Workspace con tu dominio · el script debe publicarlo una cuenta <b>administradora de Workspace</b> (con permiso para crear usuarios) · servicio <b>Admin SDK API</b> agregado en el editor del script · conexión guardada arriba · dominio definido. Si no los cumples, déjalo desactivado: las cuentas del sistema funcionan igual.</p>
+    <ol style="color:var(--mute);line-height:1.7;padding-left:20px;margin:0 0 12px"><li>Con la cuenta administradora, en el editor del script: <i>Servicios (＋) → Admin SDK API → Agregar</i>.</li>
+    <li>Pulsa <b>Copiar código</b> otra vez (el código se actualizó), pégalo y publica una <i>nueva versión</i> (<i>Implementar → Administrar implementaciones → Editar → Nueva versión</i>).</li>
+    <li>En <a href="https://admin.google.com" target="_blank" rel="noopener">admin.google.com</a> → <i>Seguridad → Controles de API</i> confirma que el acceso a las API de Google Workspace está permitido.</li>
+    <li>Pulsa el botón de abajo. Si una cuenta no se puede crear, el script te avisa por correo con el motivo.</li></ol>
+    <button class="btn ${inst.google ? "del" : ""}" data-a="google-toggle">${inst.google ? "Desactivar la creación de cuentas de Google" : "Activar la creación de cuentas de Google"}</button></div>`;
+  return domCard + gmail + googleCard;
 }
 function vCuenta() {
   const tiene = !!fotos[yo.id], grande = avatarDe(nombreCompleto(yo), yo.usuario, yo.id).replace('class="av"', tiene ? 'class="av big" data-a="foto-ampliar" title="Ampliar foto"' : 'class="av big"');
@@ -1213,10 +1276,12 @@ function mostrarCredenciales(v, titulo = "Cuenta creada") {
   abrirDlg(`<div class="dhead"><div><b>${esc(titulo)}</b><small>${ROL[v.rol] || ""}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>
     <div class="cred">${v.correo_institucional ? `<div><span>Correo institucional</span><code style="font-size:15px">${esc(v.correo_institucional)}</code><button class="btn sm sec" data-a="copiar" data-t="${esc(v.correo_institucional)}">Copiar</button></div>` : ""}
     <div><span>Usuario</span><code>${esc(v.usuario)}</code><button class="btn sm sec" data-a="copiar" data-t="${esc(v.usuario)}">Copiar</button></div>
+    ${v.clave_google ? `<div><span>Contraseña de Google (temporal)</span><code>${esc(v.clave_google)}</code><button class="btn sm sec" data-a="copiar" data-t="${esc(v.clave_google)}">Copiar</button></div>` : ""}
     <div><span>Código de activación</span><code>${esc(v.codigo)}</code><button class="btn sm sec" data-a="copiar" data-t="${esc(v.codigo)}">Copiar</button></div></div>
+    ${v.clave_google ? `<p class="msg">Se está creando la cuenta real de Google <b>${esc(v.correo_institucional || "")}</b> con esa contraseña temporal (Google pedirá cambiarla al entrar). Si no se puede crear, la cuenta administradora recibe un aviso por correo con el motivo.</p>` : ""}
     ${v.correo_personal ? (v.enviado ? `<p class="msg">✔ Se enviaron las credenciales a <b>${esc(v.correo_personal)}</b>.</p>` : `<p class="msg warn">No se pudo enviar el correo a <b>${esc(v.correo_personal)}</b> (el envío no está configurado o falló). Entrégale las credenciales tú.</p>`) : ""}
     <p class="msg warn">Guarda el código ahora: por seguridad no se vuelve a mostrar (si se pierde, genera uno nuevo en «Cuentas y permisos»). La persona debe entrar en <b>Activar cuenta</b> y crear su contraseña.</p>
-    <button class="btn" data-a="copiar" data-t="Usuario: ${esc(v.correo_institucional || v.usuario)}  Código: ${esc(v.codigo)}">Copiar usuario y código</button>`);
+    <button class="btn" data-a="copiar" data-t="Usuario: ${esc(v.correo_institucional || v.usuario)}  Código: ${esc(v.codigo)}${v.clave_google ? "  Contraseña de Google: " + esc(v.clave_google) : ""}">Copiar usuario y código</button>`);
 }
 function abrirPermisos(p) {
   const claves = p.rol === "alumno" ? PERMISOS_ALUMNO : Object.keys(PERMISOS);
@@ -1264,6 +1329,12 @@ const acciones = {
     if (!confirm("¿Quitar la conexión con tu cuenta de Google? Los correos dejarán de enviarse desde ella.")) return;
     await rpc("quitar_correo_institucion", {}); yo = await rpc("mi_sesion"); render(); toast("Conexión quitada.");
   },
+  async "google-toggle"() {
+    const on = !yo.institucion.google;
+    if (on && !confirm("Al registrar a cada persona se creará una cuenta REAL de Google en tu dominio, con una contraseña temporal. ¿Activarlo?")) return;
+    await rpc("actualizar_cuentas_google", { p_activo: on }); yo = await rpc("mi_sesion"); render();
+    toast(on ? "Se crearán cuentas reales de Google al registrar personas." : "Creación de cuentas de Google desactivada.");
+  },
   "inv-modo"(d) { invModo = d.id; conTransicion(render); },
   async "inst-dominio"(d) {
     const i = instDe(idNum(d)); await rpc("actualizar_dominio", { p_inst: i.id, p_dominio: $(`#dom${i.id}`).value });
@@ -1297,8 +1368,8 @@ const acciones = {
   },
   "mas-csv"() {
     const campo = s => { s = String(s ?? ""); return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    const filas = masivo.resultados.map(x => [x.nombre, x.ok ? x.usuario : "", x.ok ? (x.correo_institucional || "") : "", x.ok ? x.codigo : "", x.correo_personal || "", x.ok ? (x.enviado ? "enviado" : "creada, sin enviar") : "error: " + x.error]);
-    const csv = ["nombre", "usuario", "correo_institucional", "codigo", "correo_personal", "estado"].join(",") + "\r\n" + filas.map(f => f.map(campo).join(",")).join("\r\n") + "\r\n";
+    const filas = masivo.resultados.map(x => [x.nombre, x.ok ? x.usuario : "", x.ok ? (x.correo_institucional || "") : "", x.ok ? x.codigo : "", x.ok ? (x.clave_google || "") : "", x.correo_personal || "", x.ok ? (x.enviado ? "enviado" : "creada, sin enviar") : "error: " + x.error]);
+    const csv = ["nombre", "usuario", "correo_institucional", "codigo", "clave_google", "correo_personal", "estado"].join(",") + "\r\n" + filas.map(f => f.map(campo).join(",")).join("\r\n") + "\r\n";
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" })); a.download = "credenciales.csv"; a.click();
   },
   "mas-nuevo"() { masivo = nuevoMasivo(masivo); render(); },
