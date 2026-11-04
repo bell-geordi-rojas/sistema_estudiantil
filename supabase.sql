@@ -1364,6 +1364,7 @@ language plpgsql security definer set search_path = public as $$
 begin
   if not permiso('editar_estudiantes') or not _puedo_gestionar(p_id) then raise exception 'No autorizado.'; end if;
   update estudiantes set codigo = trim(p_codigo), nombre = trim(p_nombre) where id = p_id;
+  perform _notificar_est(p_id, 'actualizó tus datos (código y nombre).');
 end $$;
 
 create or replace function reasignar_docente(p_id bigint, p_docente uuid) returns void
@@ -1401,6 +1402,7 @@ begin
     values (p_estudiante, p_curso, p_periodo, p_nota, coalesce(p_peso, 1), nullif(left(trim(coalesce(p_titulo, '')), 60), ''))
     returning id into v_id;
   perform _guardar_comentario(v_id, p_comentario);
+  perform _notificar_est(p_estudiante, 'te puso una nota de ' || p_nota || ' en «' || (select nombre from cursos where id = p_curso) || '» (' || (select nombre from periodos where id = p_periodo) || ').');
 end $$;
 
 -- Al editar, titulo y comentario se reemplazan siempre (vacio = quitarlos); el peso solo cambia si se envia
@@ -1415,6 +1417,7 @@ begin
   if v_est is null or not permiso('editar_notas') or not _puedo_calificar(v_est, v_cur) then raise exception 'No autorizado.'; end if;
   update notas set nota = p_nota, peso = coalesce(p_peso, peso), titulo = nullif(left(trim(coalesce(p_titulo, '')), 60), '') where id = p_id;
   perform _guardar_comentario(p_id, p_comentario);
+  perform _notificar_est(v_est, 'cambió una de tus notas en «' || (select nombre from cursos where id = v_cur) || '»: ahora es ' || p_nota || '.');
 end $$;
 
 create or replace function eliminar_nota(p_id bigint) returns void
@@ -1423,6 +1426,7 @@ declare v_est bigint; v_cur bigint;
 begin
   select estudiante_id, curso_id into v_est, v_cur from notas where id = p_id;
   if v_est is null or not permiso('editar_notas') or not _puedo_calificar(v_est, v_cur) then raise exception 'No autorizado.'; end if;
+  perform _notificar_est(v_est, 'eliminó una de tus notas en «' || (select nombre from cursos where id = v_cur) || '».');
   delete from notas where id = p_id;
 end $$;
 
@@ -1579,6 +1583,7 @@ begin
     if v_ord < v_max then raise exception 'Solo puedes cerrar el ultimo periodo activo.'; end if;
     delete from periodos_activos where periodo_id = p_periodo and ((v_por and curso_id = p_curso) or (not v_por and docente_id = v_doc));
   end if;
+  perform _notificar_curso(p_curso, case when p_activo then 'activó «' else 'cerró «' end || (select nombre from periodos where id = p_periodo) || '»' || case when p_curso is null then '.' else ' en «' || (select nombre from cursos where id = p_curso) || '».' end);
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -1587,15 +1592,29 @@ end $$;
 create or replace function _notificar(p_perfil uuid, p_msg text) returns void language plpgsql security definer set search_path = public as $$
 declare v_quien text; v_inst bigint;
 begin
-  if mi_rol() not in ('admin', 'dueno') or p_perfil is null or p_perfil = auth.uid() then return; end if;
+  if mi_rol() is null or p_perfil is null or p_perfil = auth.uid() then return; end if;
   select institucion_id into v_inst from perfiles where id = p_perfil;
   if not found then return; end if;
   select coalesce(nullif(trim(coalesce(nombres, '') || ' ' || coalesce(apellidos, '')), ''), 'La administración') into v_quien from perfiles where id = auth.uid();
-  insert into notificaciones (perfil_id, institucion_id, mensaje) values (p_perfil, v_inst, 'El administrador ' || v_quien || ' ' || p_msg);
+  insert into notificaciones (perfil_id, institucion_id, mensaje) values (p_perfil, v_inst, case mi_rol() when 'admin' then 'El administrador ' when 'dueno' then 'El dueño ' when 'alumno' then 'El alumno ' else 'El docente ' end || v_quien || ' ' || p_msg);
 end $$;
 create or replace function _notificar_est(p_est bigint, p_msg text) returns void language plpgsql security definer set search_path = public as $$
 begin
   perform _notificar((select perfil_id from estudiantes where id = p_est), p_msg);
+end $$;
+
+-- Avisa a los alumnos de un curso (p_curso nulo: a los alumnos del aula del docente actual, en primaria)
+create or replace function _notificar_curso(p_curso bigint, p_msg text) returns void language plpgsql security definer set search_path = public as $$
+declare r record; v_inst bigint := mi_inst();
+begin
+  for r in select e.perfil_id from estudiantes e
+           where e.perfil_id is not null and e.institucion_id = v_inst and (
+             (p_curso is null and e.docente_id = auth.uid())
+             or (p_curso is not null and exists (select 1 from inscripciones i where i.estudiante_id = e.id and i.curso_id = p_curso))
+             or (p_curso is not null and not _por_curso(v_inst) and e.docente_id = auth.uid()))
+  loop
+    perform _notificar(r.perfil_id, p_msg);
+  end loop;
 end $$;
 
 create or replace function marcar_notificaciones_leidas() returns void language sql security definer set search_path = public as $$
@@ -1728,6 +1747,8 @@ begin
   if length(p_titulo) < 1 or length(p_titulo) > 120 then raise exception 'Escribe el titulo de la tarea (maximo 120 letras).'; end if;
   insert into tareas (institucion_id, curso_id, docente_id, titulo, descripcion, limite)
     values (v_inst, p_curso, auth.uid(), p_titulo, left(coalesce(p_descripcion, ''), 2000), p_limite) returning id into v_id;
+  perform _notificar_curso(p_curso, 'publicó la tarea «' || p_titulo || '» en «' || (select nombre from cursos where id = p_curso) || '»'
+    || case when p_limite is null then '.' else ', con fecha límite ' || to_char(p_limite at time zone 'America/Lima', 'DD/MM/YYYY HH24:MI') || '.' end);
   return v_id;
 end $$;
 
@@ -1771,6 +1792,7 @@ begin
     delete from tarea_archivos where tarea_id = p_tarea and tipo = 'entrega' and estudiante_id = v_est;
     insert into tarea_archivos (institucion_id, curso_id, tarea_id, tipo, estudiante_id, docente_id, subido_por, nombre, mime, tam, contenido)
       values (v_inst, p_curso, p_tarea, 'entrega', v_est, t.docente_id, auth.uid(), left(p_nombre, 200), left(coalesce(p_mime, ''), 100), (length(p_contenido) * 3) / 4, p_contenido) returning id into v_id;
+    perform _notificar(t.docente_id, 'entregó la tarea «' || t.titulo || '».');
   else
     raise exception 'Tipo de archivo invalido.';
   end if;
@@ -1927,7 +1949,7 @@ begin
   for f in select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname = any (array[
              '_generar_usuario', '_crear_invitacion', '_puede_resolver_solicitud', '_puede_invitacion', '_puedo_gestionar', '_alcance_perfil', 'crear_invitacion_dueno',
-             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario', '_enviar_credenciales', 'configurar_correo', '_sembrar_carreras', '_migrar_a_cursos', '_ciclos_defecto', '_puedo_calificar', '_autoinscribir_estudiante', '_autoinscribir_curso', '_notificar', '_notificar_est', '_sembrar_grados'])
+             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario', '_enviar_credenciales', 'configurar_correo', '_sembrar_carreras', '_migrar_a_cursos', '_ciclos_defecto', '_puedo_calificar', '_autoinscribir_estudiante', '_autoinscribir_curso', '_notificar', '_notificar_est', '_notificar_curso', '_sembrar_grados'])
   loop
     execute format('revoke all on function %s from public, anon, authenticated', f);
   end loop;
