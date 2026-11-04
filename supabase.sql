@@ -157,6 +157,41 @@ create table if not exists periodos_activos (
 create unique index if not exists periodos_activos_curso on periodos_activos (periodo_id, curso_id) where curso_id is not null;
 create unique index if not exists periodos_activos_docente on periodos_activos (periodo_id, docente_id) where docente_id is not null;
 alter table periodos_activos enable row level security;
+
+-- Tareas: el docente crea una "carpeta de tarea" en un curso (con material y fecha limite) y los alumnos entregan sus archivos en ella.
+--   docente_id es quien la creo (en primaria, el tutor: solo sus alumnos la ven).
+create table if not exists tareas (
+  id bigint generated always as identity primary key,
+  institucion_id bigint not null references instituciones (id) on delete cascade,
+  curso_id bigint not null references cursos (id) on delete cascade,
+  docente_id uuid not null references perfiles (id) on delete cascade,
+  titulo text not null check (length(titulo) between 1 and 120),
+  descripcion text not null default '' check (length(descripcion) <= 2000),
+  limite timestamptz,
+  creado timestamptz not null default now()
+);
+create index if not exists tareas_curso on tareas (curso_id);
+-- Archivos: material del docente (de una tarea, o suelto en el curso si tarea_id es nulo) y entregas de los alumnos.
+-- El contenido va en base64 (maximo ~4 MB por archivo); las listas no lo piden, solo se descarga al abrir el archivo.
+create table if not exists tarea_archivos (
+  id bigint generated always as identity primary key,
+  institucion_id bigint not null references instituciones (id) on delete cascade,
+  curso_id bigint not null references cursos (id) on delete cascade,
+  tarea_id bigint references tareas (id) on delete cascade,
+  tipo text not null check (tipo in ('material', 'entrega')),
+  estudiante_id bigint references estudiantes (id) on delete cascade,
+  docente_id uuid references perfiles (id) on delete cascade,
+  subido_por uuid references perfiles (id) on delete set null,
+  nombre text not null check (length(nombre) between 1 and 200),
+  mime text not null default 'application/octet-stream',
+  tam integer not null default 0,
+  contenido text not null,
+  creado timestamptz not null default now()
+);
+create index if not exists tarea_archivos_tarea on tarea_archivos (tarea_id);
+create index if not exists tarea_archivos_curso on tarea_archivos (curso_id);
+alter table tareas enable row level security;
+alter table tarea_archivos enable row level security;
 alter table carreras enable row level security;
 alter table docente_cursos enable row level security;
 alter table inscripciones enable row level security;
@@ -465,6 +500,14 @@ create or replace function _periodo_visible(p_inst bigint, p_curso bigint, p_doc
       or exists (select 1 from periodos_activos a where a.periodo_id = p_periodo
                  and ((_por_curso(p_inst) and a.curso_id = p_curso) or (not _por_curso(p_inst) and a.docente_id = p_docente))) $$;
 
+-- El usuario actual puede ver las tareas de ese curso (p_docente: quien las creo; en primaria solo cuentan las del tutor del alumno)
+create or replace function _tarea_visible(p_curso bigint, p_docente uuid) returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from cursos c where c.id = p_curso and mi_rol() is not null and (
+    mi_rol() = 'dueno'
+    or (mi_rol() = 'admin' and c.institucion_id = mi_inst())
+    or (mi_rol() = 'docente' and c.institucion_id = mi_inst() and ((_por_curso(c.institucion_id) and _ensena(c.id)) or (not _por_curso(c.institucion_id) and p_docente = auth.uid())))
+    or (mi_rol() = 'alumno' and c.institucion_id = mi_inst() and ((_por_curso(c.institucion_id) and _inscrito(_mi_estudiante(), c.id)) or (not _por_curso(c.institucion_id) and p_docente = mi_docente()))))) $$;
+
 -- El usuario actual puede modificar los datos de ese estudiante (admin de su institucion; en primaria tambien su docente a cargo)
 create or replace function _puedo_gestionar(p_est bigint) returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from estudiantes e where e.id = p_est and (
@@ -567,6 +610,13 @@ create policy insc_sel on inscripciones for select to authenticated using (
   or (mi_rol() = 'admin' and exists (select 1 from cursos c where c.id = inscripciones.curso_id and c.institucion_id = mi_inst()))
   or (mi_rol() = 'docente' and _ensena(curso_id))
   or (mi_rol() = 'alumno' and (estudiante_id = _mi_estudiante() or _inscrito(_mi_estudiante(), curso_id))));
+
+drop policy if exists tareas_sel on tareas;
+create policy tareas_sel on tareas for select to authenticated using (_tarea_visible(curso_id, docente_id));
+drop policy if exists tarea_archivos_sel on tarea_archivos;
+create policy tarea_archivos_sel on tarea_archivos for select to authenticated using (
+  (tipo = 'material' and _tarea_visible(curso_id, docente_id))
+  or (tipo = 'entrega' and (estudiante_id = _mi_estudiante() or (mi_rol() <> 'alumno' and _tarea_visible(curso_id, docente_id)))));
 
 drop policy if exists pa_sel on periodos_activos;
 create policy pa_sel on periodos_activos for select to authenticated using (
@@ -1439,6 +1489,81 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
+-- Tareas y archivos (docente: crea carpetas y sube material; alumno: entrega su trabajo)
+-- ---------------------------------------------------------------------------
+create or replace function crear_tarea(p_curso bigint, p_titulo text, p_descripcion text default '', p_limite timestamptz default null) returns bigint
+language plpgsql security definer set search_path = public as $$
+declare v_inst bigint; v_id bigint;
+begin
+  if mi_rol() not in ('admin', 'docente') then raise exception 'No autorizado.'; end if;
+  select institucion_id into v_inst from cursos where id = p_curso;
+  if v_inst is null or v_inst is distinct from mi_inst() then raise exception 'Curso invalido.'; end if;
+  if not _tarea_visible(p_curso, auth.uid()) then raise exception 'No autorizado: ese curso no es tuyo.'; end if;
+  if not _por_curso(v_inst) and mi_rol() <> 'docente' then raise exception 'En primaria las tareas las crea el docente de cada aula.'; end if;
+  p_titulo := trim(coalesce(p_titulo, ''));
+  if length(p_titulo) < 1 or length(p_titulo) > 120 then raise exception 'Escribe el titulo de la tarea (maximo 120 letras).'; end if;
+  insert into tareas (institucion_id, curso_id, docente_id, titulo, descripcion, limite)
+    values (v_inst, p_curso, auth.uid(), p_titulo, left(coalesce(p_descripcion, ''), 2000), p_limite) returning id into v_id;
+  return v_id;
+end $$;
+
+create or replace function eliminar_tarea(p_id bigint) returns void
+language plpgsql security definer set search_path = public as $$
+declare t tareas;
+begin
+  select * into t from tareas where id = p_id;
+  if not found then raise exception 'Tarea no encontrada.'; end if;
+  if not ((mi_rol() = 'admin' and t.institucion_id = mi_inst()) or (mi_rol() = 'docente' and t.docente_id = auth.uid())) then raise exception 'No autorizado.'; end if;
+  delete from tareas where id = p_id;
+end $$;
+
+-- Sube un archivo. p_tipo 'material' (docente, a una tarea o suelto en el curso) o 'entrega' (alumno, a una tarea; reemplaza la entrega anterior)
+create or replace function subir_archivo(p_curso bigint, p_tarea bigint, p_tipo text, p_nombre text, p_mime text, p_contenido text) returns bigint
+language plpgsql security definer set search_path = public as $$
+declare v_inst bigint; t tareas; v_est bigint; v_id bigint; v_doc uuid; v_ext text;
+begin
+  p_nombre := trim(coalesce(p_nombre, ''));
+  v_ext := lower(substring(p_nombre from '\.([A-Za-z0-9]+)$'));
+  if p_contenido is null or length(p_contenido) < 4 then raise exception 'El archivo esta vacio.'; end if;
+  if length(p_contenido) > 5600000 then raise exception 'El archivo pesa mas de 4 MB.'; end if;
+  if p_contenido !~ '^[A-Za-z0-9+/=]+$' then raise exception 'Archivo invalido.'; end if;
+  select institucion_id into v_inst from cursos where id = p_curso;
+  if v_inst is null or v_inst is distinct from mi_inst() then raise exception 'Curso invalido.'; end if;
+  if p_tarea is not null then
+    select * into t from tareas where id = p_tarea and curso_id = p_curso;
+    if not found then raise exception 'Tarea no encontrada.'; end if;
+  end if;
+  if p_tipo = 'material' then
+    if mi_rol() not in ('admin', 'docente') or not _tarea_visible(p_curso, auth.uid()) then raise exception 'No autorizado.'; end if;
+    if v_ext is null or v_ext not in ('pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt') then raise exception 'Solo se aceptan PDF, Word, PowerPoint, Excel o texto.'; end if;
+    v_doc := coalesce(t.docente_id, auth.uid());
+    insert into tarea_archivos (institucion_id, curso_id, tarea_id, tipo, docente_id, subido_por, nombre, mime, tam, contenido)
+      values (v_inst, p_curso, p_tarea, 'material', v_doc, auth.uid(), left(p_nombre, 200), left(coalesce(p_mime, ''), 100), (length(p_contenido) * 3) / 4, p_contenido) returning id into v_id;
+  elsif p_tipo = 'entrega' then
+    if mi_rol() <> 'alumno' or p_tarea is null then raise exception 'No autorizado.'; end if;
+    v_est := _mi_estudiante();
+    if v_est is null or not _tarea_visible(p_curso, t.docente_id) then raise exception 'Esta tarea no es de tus cursos.'; end if;
+    if v_ext is null or v_ext not in ('pdf', 'doc', 'docx') then raise exception 'Sube tu tarea en PDF o Word (.pdf, .doc, .docx).'; end if;
+    delete from tarea_archivos where tarea_id = p_tarea and tipo = 'entrega' and estudiante_id = v_est;
+    insert into tarea_archivos (institucion_id, curso_id, tarea_id, tipo, estudiante_id, docente_id, subido_por, nombre, mime, tam, contenido)
+      values (v_inst, p_curso, p_tarea, 'entrega', v_est, t.docente_id, auth.uid(), left(p_nombre, 200), left(coalesce(p_mime, ''), 100), (length(p_contenido) * 3) / 4, p_contenido) returning id into v_id;
+  else
+    raise exception 'Tipo de archivo invalido.';
+  end if;
+  return v_id;
+end $$;
+
+create or replace function eliminar_archivo(p_id bigint) returns void
+language plpgsql security definer set search_path = public as $$
+declare a tarea_archivos;
+begin
+  select * into a from tarea_archivos where id = p_id;
+  if not found then raise exception 'Archivo no encontrado.'; end if;
+  if not ((mi_rol() = 'admin' and a.institucion_id = mi_inst()) or a.subido_por = auth.uid()) then raise exception 'No autorizado.'; end if;
+  delete from tarea_archivos where id = p_id;
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- 10. Primera cuenta: el dueno (se ejecuta una vez, a mano, con TU usuario y TU codigo secreto)
 -- ---------------------------------------------------------------------------
 -- Cada administrador conecta la cuenta de Google de su institucion (desde la pantalla «Correo»); el dueno puede indicar p_inst
@@ -1563,7 +1688,7 @@ begin
              'cambiar_rol', 'eliminar_cuenta', 'regenerar_codigo', 'eliminar_invitacion', 'registrar_estudiante', 'actualizar_estudiante', 'reasignar_docente',
              'eliminar_estudiante', 'agregar_nota', 'actualizar_nota', 'eliminar_nota',
              'cambiar_tipo_institucion', 'eliminar_institucion', 'crear_invitaciones_masivo', 'actualizar_dominio', 'configurar_correo_institucion', 'quitar_correo_institucion', 'probar_correo', 'actualizar_cuentas_google',
-             'activar_periodo', 'crear_carrera', 'editar_carrera', 'eliminar_carrera', 'asignar_curso_docente', 'inscribir_estudiantes', 'inscribir_ciclo', 'cambiar_carrera_estudiante', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
+             'activar_periodo', 'crear_tarea', 'eliminar_tarea', 'subir_archivo', 'eliminar_archivo', 'crear_carrera', 'editar_carrera', 'eliminar_carrera', 'asignar_curso_docente', 'inscribir_estudiantes', 'inscribir_ciclo', 'cambiar_carrera_estudiante', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
              'crear_periodo', 'renombrar_periodo', 'eliminar_periodo', 'actualizar_mi_perfil', 'actualizar_mi_foto'])
   loop
     execute format('revoke all on function %s from public, anon', f);

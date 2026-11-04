@@ -523,7 +523,7 @@ class Estudiante {
 
 /* ===== Estado ===== */
 let yo = null, permisos = {};
-let est = [], perfiles = [], insts = [], solic = [], invs = [], cursos = [], periodos = [], carreras = [], docCursos = [], inscr = [], activos = [];
+let est = [], perfiles = [], insts = [], solic = [], invs = [], cursos = [], periodos = [], carreras = [], docCursos = [], inscr = [], activos = [], tareas = [], archivos = [];
 let inscrSet = new Set();   // "estudiante-curso" de cada inscripción, para consultarlas al instante
 let vista = "panel", orden = 0, filtro = "", detalleId = null, borrador = [], kBorr = 0, periodoSel = null;
 let tabLogin = "ingresar", instSel = null, avisoCarga = "", estadoSis = null;
@@ -610,6 +610,7 @@ async function cargarDatos(adelantadas) {
   cursos = cu; periodos = pe; carreras = ca; inscr = ins; docCursos = dc; activos = pa || []; inscrSet = new Set(ins.map(x => x.estudiante_id + "-" + x.curso_id));
   if (periodoSel && !periodos.some(x => x.id === periodoSel)) periodoSel = null;
   est = e.map(d => new Estudiante(d)); perfiles = p; insts = i2; solic = s2; invs = v2;
+  recargarTareas().then(() => { if (vista === "tareas") repintarTareas(); }).catch(() => {});
 }
 async function recargarTodo() { await cargarDatos(); render(); }
 
@@ -787,8 +788,9 @@ function vistasDisponibles() {
   if (r !== "dueno") v.push(["cursos", "❖", r === "alumno" ? "Mis cursos" : "Cursos"]);
   if (r === "admin" && esUni()) v.push(["carreras", "◈", "Carreras"]);
   if (r === "admin" && porCurso()) { v.push(["asignaciones", "☰", "Docentes y cursos"]); v.push(["inscripciones", "✓", "Inscripciones"]); }
-  if (r === "alumno") { v.push(["mis", "★", "Mis notas"]); v.push(["comentarios", "✎", "Mis comentarios"]); }
+  if (r === "alumno") { v.push(["mis", "★", "Mis notas"]); v.push(["tareas", "✐", "Tareas"]); v.push(["comentarios", "✎", "Mis comentarios"]); }
   else v.push(["lista", "☰", r === "dueno" ? "Estudiantes (lectura)" : "Estudiantes"]);
+  if (esStaff()) v.push(["tareas", "✐", "Tareas"]);
   if (esStaff() && p.editar_notas) v.push(["calificar", "✎", "Agregar calificación"]);
   if (r !== "alumno") v.push(["buscar", "⌕", "Buscar por código"]);
   if (r === "dueno" || p.ver_estadisticas) v.push(["estadisticas", "◔", "Estadísticas"]);
@@ -1347,7 +1349,7 @@ function pantallaApp() {
   let cuerpo;
   if (avisoCarga) cuerpo = `<div class="card"><h2>No se pudieron cargar los datos</h2><p class="err">${esc(avisoCarga)}</p><button class="btn" data-a="reintentar">Reintentar</button></div>`;
   else cuerpo = { panel: vPanel, mis: vMis, lista: vLista, registrar: vRegistrar, calificar: vCalificar, buscar: vBuscar, estadisticas: vEstadisticas,
-    usuarios: vUsuarios, solicitudes: vSolicitudes, invitar: vInvitar, instituciones: vInstituciones, carpetas: vCarpetas, cuenta: vCuenta, config: vConfig, comentarios: vComentarios, descargar: vDescargar, cursos: vCursos, correo: vCorreo, asignaciones: vAsignaciones, inscripciones: vInscripciones, carreras: vCarreras }[vista]();
+    usuarios: vUsuarios, solicitudes: vSolicitudes, invitar: vInvitar, instituciones: vInstituciones, carpetas: vCarpetas, tareas: vTareas, cuenta: vCuenta, config: vConfig, comentarios: vComentarios, descargar: vDescargar, cursos: vCursos, correo: vCorreo, asignaciones: vAsignaciones, inscripciones: vInscripciones, carreras: vCarreras }[vista]();
   const aviso = yo.rol === "dueno" && yo.mantenimiento ? `<div class="msg warn" style="border-radius:0;text-align:center">⚠ El sistema está en mantenimiento: solo tú puedes usarlo. Reanúdalo en «Instituciones».</div>` : "";
   return `${cabecera(true, nav)}${aviso}<div class="layout"><nav>${nav}</nav><main id="main">${cuerpo}</main></div>`;
 }
@@ -1355,7 +1357,10 @@ function render() {
   if (actualizacion) { cerrarDlg(); $("#root").innerHTML = pantallaActualizar(); return; }
   $("#root").innerHTML = !yo ? pantallaLogin() : !yo.acceso ? pantallaBloqueo() : pantallaApp();
 }
-function irA(v) { if (v === "registrar") borrador = []; vista = v; conTransicion(render); }
+function irA(v) {
+  if (v === "registrar") borrador = []; vista = v; conTransicion(render);
+  if (v === "tareas") recargarTareas().then(() => { if (vista === "tareas") repintarTareas(); }).catch(() => {});   // datos frescos al abrir
+}
 
 /* ===== Ventanas (modal) ===== */
 // Reemplazo de prompt() (el programa de PC no lo admite): devuelve el texto o null si se cancela
@@ -1514,13 +1519,116 @@ function htmlCurso(c, tab) {
   const sub = alumno && total.length ? `${esUni() ? "Promedio ponderado" : "Promedio"} del curso: ${fmt(mediaPond(total))}` : (alumno ? "Sin notas aún" : "Notas por " + nomPeriodo(yo.institucion.tipo).toLowerCase());
   const pestana = (k, n) => `<button class="${tab === k ? "on" : ""}" data-a="curso-tab" data-id="${k}" data-c="${c.id}">${n}</button>`;
   return `<div class="banw" style="margin:-18px -18px 14px;view-transition-name:banner-curso">${bannerCurso(c.id)}</div><div class="dhead"><div><b>${esc(c.nombre)}</b><small>${etiquetaCurso(c) ? esc(etiquetaCurso(c)) + " · " : ""}${esc(sub)}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>
-    <div class="tabs" style="max-width:320px;margin-bottom:12px">${pestana("notas", "Notas")}${pestana("personas", "Personas")}</div>
-    ${tab === "personas" ? personasCurso(c) : (cursoSecciones(c) || `<div class="empty">Aún no hay ${nomPeriodos(yo.institucion.tipo)} configurados.</div>`)}`;
+    <div class="tabs" style="max-width:440px;margin-bottom:12px">${pestana("notas", "Notas")}${pestana("tareas", "Tareas")}${pestana("personas", "Personas")}</div>
+    ${tab === "personas" ? personasCurso(c) : tab === "tareas" ? tareasTab(c) : (cursoSecciones(c) || `<div class="empty">Aún no hay ${nomPeriodos(yo.institucion.tipo)} configurados.</div>`)}`;
+}
+/* ===== Tareas: el docente crea carpetas con material y los alumnos entregan su trabajo (PDF o Word) ===== */
+const SEL_TAREAS = ["tareas?select=id,curso_id,docente_id,titulo,descripcion,limite,creado&order=creado.desc",
+  "tarea_archivos?select=id,curso_id,tarea_id,tipo,estudiante_id,subido_por,nombre,mime,tam,creado&order=creado"];
+async function recargarTareas() { const [a, b] = await Promise.all(SEL_TAREAS.map(q => sel(q).catch(() => []))); tareas = a; archivos = b; }
+const MAX_ARCHIVO = 4 * 1024 * 1024;
+const fmtTam = n => n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+const fechaHora = s => new Date(s).toLocaleString("es-PE", { dateStyle: "medium", timeStyle: "short" });
+function leerBase64(file) {
+  return new Promise((ok, mal) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1] || ""); r.onerror = () => mal(new Error("No se pudo leer el archivo.")); r.readAsDataURL(file); });
+}
+async function bajarArchivo(id) {
+  const [a] = await sel(`tarea_archivos?id=eq.${id}&select=nombre,mime,contenido`);
+  if (!a) throw new Error("Archivo no encontrado.");
+  const bin = atob(a.contenido), bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes], { type: a.mime || "application/octet-stream" })), l = document.createElement("a");
+  l.href = url; l.download = a.nombre; document.body.appendChild(l); l.click(); l.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+const miEstudiante = () => est.find(x => x.perfil_id === yo.id);
+const entregaDe = (t, e) => e ? archivos.find(a => a.tipo === "entrega" && a.tarea_id === t.id && a.estudiante_id === e.id) : null;
+const tareasDeCurso = c => tareas.filter(t => t.curso_id === c.id);
+const cursosQueDicto = () => yo.rol === "docente" && porCurso() ? miCursos().filter(c => docCursos.some(x => x.docente_id === yo.id && x.curso_id === c.id)) : miCursos();
+function estadoTarea(t) {
+  if (yo.rol !== "alumno") { const n = archivos.filter(a => a.tipo === "entrega" && a.tarea_id === t.id).length; return `<span class="chip">${n} entrega(s)</span>`; }
+  const en = entregaDe(t, miEstudiante());
+  if (en) return `<span class="chip on">${t.limite && new Date(en.creado) > new Date(t.limite) ? "Entregada con retraso" : "Entregada ✔"}</span>`;
+  return t.limite && new Date(t.limite) < new Date() ? `<span class="chip" style="color:var(--bad,#e5575a)">Vencida</span>` : `<span class="chip">Pendiente</span>`;
+}
+function filaTarea(t, conCurso) {
+  const c = cursoDe(t.curso_id);
+  return `<div class="card" style="margin:0 0 10px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+    <div><b>${esc(t.titulo)}</b><small style="display:block;color:var(--mute)">${conCurso && c ? esc(c.nombre) + " · " : ""}${t.limite ? "Fecha límite: " + fechaHora(t.limite) : "Sin fecha límite"}</small></div>
+    <div style="display:flex;gap:8px;align-items:center">${estadoTarea(t)}<button class="btn sm sec" data-a="tarea-abrir" data-id="${t.id}">Abrir</button></div></div>`;
+}
+function formTarea(cursoFijo) {
+  const cs = cursosQueDicto(); if (!cs.length && !cursoFijo) return "";
+  return `<form id="fTarea" class="card" style="margin:0 0 14px"><h2 style="margin-top:0">Nueva carpeta de tarea</h2>
+    ${cursoFijo ? `<input type="hidden" name="curso" value="${cursoFijo.id}">` : `<label>Curso<select name="curso" required>${cs.map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join("")}</select></label>`}
+    <label>Título<input name="titulo" maxlength="120" required placeholder="p. ej. Informe de la unidad 2"></label>
+    <label>Instrucciones (opcional)<textarea name="descripcion" rows="3" maxlength="2000"></textarea></label>
+    <label>Fecha límite (opcional)<input type="datetime-local" name="limite"></label>
+    <div class="err"></div><button class="btn">Crear carpeta</button></form>`;
+}
+function tareasTab(c) {
+  const ts = tareasDeCurso(c), staff = esStaff() && (yo.rol === "admin" ? porCurso() : true), sueltos = archivos.filter(a => a.tipo === "material" && a.curso_id === c.id && !a.tarea_id);
+  const docs = `<div class="card" style="margin:0 0 14px"><h2 style="margin-top:0">Documentos del curso</h2>${listaArchivos(sueltos, staff)}${staff ? formSubida(c.id, null, "material") : ""}</div>`;
+  return `<div data-cursotab="${c.id}">${staff ? formTarea(c) : ""}${docs}<h2 style="font-size:16px">Tareas</h2>${ts.length ? ts.map(t => filaTarea(t, false)).join("") : `<div class="empty">Aún no hay tareas en este curso.</div>`}</div>`;
+}
+function listaArchivos(lista, puedeBorrar) {
+  if (!lista.length) return `<small style="color:var(--mute)">Sin documentos.</small>`;
+  return `<div class="scroll"><table><tbody>${lista.map(a => `<tr><td>${esc(a.nombre)}<small style="display:block;color:var(--mute)">${fmtTam(a.tam || 0)} · ${fechaHora(a.creado)}</small></td>
+    <td style="text-align:right;white-space:nowrap"><button class="btn sm sec" data-a="archivo-bajar" data-id="${a.id}">Descargar</button>${puedeBorrar || (a.tipo === "entrega" && yo.rol === "alumno") ? ` <button class="btn sm sec" data-a="archivo-borrar" data-id="${a.id}">✕</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
+}
+function formSubida(cursoId, tareaId, tipo) {
+  return `<form class="fSubida" data-c="${cursoId}" data-t="${tareaId || ""}" data-tipo="${tipo}" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <input type="file" name="archivo" required accept="${tipo === "entrega" ? ".pdf,.doc,.docx" : ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt"}" style="flex:1;min-width:200px">
+    <button class="btn sm">${tipo === "entrega" ? "Entregar tarea" : "Subir documento"}</button><div class="err" style="width:100%"></div></form>`;
+}
+function htmlTarea(id) {
+  const t = tareas.find(x => x.id === id); if (!t) return `<div class="dhead"><b>Tarea no encontrada</b><button class="btn sec" data-a="cerrar">✕</button></div>`;
+  const c = cursoDe(t.curso_id), alumno = yo.rol === "alumno", mats = archivos.filter(a => a.tipo === "material" && a.tarea_id === t.id);
+  const mio = alumno ? miEstudiante() : null, en = alumno ? entregaDe(t, mio) : null;
+  const dueno = yo.rol === "admin" || t.docente_id === yo.id;
+  let cuerpo;
+  if (alumno) {
+    cuerpo = `<h3 style="font-size:15px">Mi entrega</h3>${en ? `<p class="msg">${estadoTarea(t)} Entregaste «${esc(en.nombre)}» el ${fechaHora(en.creado)}. Si subes otro archivo, reemplaza al anterior.</p>${listaArchivos([en], true)}` : `<p class="msg warn">Aún no has entregado esta tarea.</p>`}
+      ${formSubida(t.curso_id, t.id, "entrega")}<p style="color:var(--mute);font-size:12px">PDF o Word, máximo 4 MB.</p>`;
+  } else {
+    const alumnos = est.filter(e => porCursoInst(t.institucion_id || (c && c.institucion_id)) ? inscrito(e.id, t.curso_id) : e.docente_id === t.docente_id).sort((a, b) => a.nombre.localeCompare(b.nombre));
+    cuerpo = `<h3 style="font-size:15px">Entregas (${alumnos.filter(e => entregaDe(t, e)).length} de ${alumnos.length})</h3><div class="scroll"><table><thead><tr><th>Alumno</th><th>Entrega</th><th></th></tr></thead><tbody>` +
+      (alumnos.map(e => { const a = entregaDe(t, e); return `<tr><td>${esc(e.nombre)}<small style="display:block;color:var(--mute)">${esc(e.codigo)}</small></td>
+        <td>${a ? esc(a.nombre) + `<small style="display:block;color:var(--mute)">${fechaHora(a.creado)}${t.limite && new Date(a.creado) > new Date(t.limite) ? " · con retraso" : ""}</small>` : "<small>Sin entregar</small>"}</td>
+        <td>${a ? `<button class="btn sm sec" data-a="archivo-bajar" data-id="${a.id}">Descargar</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="3"><small>No hay alumnos en este curso.</small></td></tr>`) + `</tbody></table></div>`;
+  }
+  return `<div data-tarea="${t.id}"><div class="dhead"><div><b>${esc(t.titulo)}</b><small>${c ? esc(c.nombre) + " · " : ""}${t.limite ? "Fecha límite: " + fechaHora(t.limite) : "Sin fecha límite"}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>
+    ${t.descripcion ? `<p style="white-space:pre-wrap">${esc(t.descripcion)}</p>` : ""}
+    <h3 style="font-size:15px">Material del docente</h3>${listaArchivos(mats, !alumno && dueno)}${!alumno && dueno ? formSubida(t.curso_id, t.id, "material") : ""}
+    ${cuerpo}${!alumno && dueno ? `<hr class="sep"><button class="btn sec" data-a="tarea-borrar" data-id="${t.id}">Eliminar esta tarea y sus entregas</button>` : ""}</div>`;
+}
+function vTareas() {
+  const ts = tareas.slice(), alumno = yo.rol === "alumno";
+  if (alumno) {   // las pendientes primero (por fecha límite), luego las entregadas
+    const m = miEstudiante(), pend = ts.filter(t => !entregaDe(t, m)).sort((a, b) => (a.limite ? new Date(a.limite) : 8e15) - (b.limite ? new Date(b.limite) : 8e15)), hechas = ts.filter(t => entregaDe(t, m));
+    return `<div class="card"><h2>Tareas pendientes <small>${pend.length}</small></h2>${pend.map(t => filaTarea(t, true)).join("") || `<div class="empty">No tienes tareas pendientes.</div>`}</div>
+      <div class="card"><h2>Entregadas <small>${hechas.length}</small></h2>${hechas.map(t => filaTarea(t, true)).join("") || `<div class="empty">Aún no has entregado ninguna.</div>`}</div>`;
+  }
+  return `${formTarea(null)}<div class="card"><h2>Tareas <small>${ts.length}</small></h2>${ts.map(t => filaTarea(t, true)).join("") || `<div class="empty">Aún no hay tareas. Crea la primera arriba.</div>`}</div>`;
+}
+function repintarTareas() {
+  const m = $("#dlgBody [data-tarea]"), ct = $("#dlgBody [data-cursotab]");
+  if (dlg.open && m) $("#dlgBody").innerHTML = htmlTarea(Number(m.dataset.tarea));
+  else if (dlg.open && ct) { const c = cursoDe(Number(ct.dataset.cursotab)); if (c) $("#dlgBody").innerHTML = htmlCurso(c, "tareas"); }
+  if (vista === "tareas" && $("#main")) $("#main").innerHTML = vTareas();
 }
 const acciones = {
   menu() { $("#menuPop").classList.toggle("open"); },
   "curso-menu"(d) { const m = $(`#cm${d.id}`); const abrir = !m.classList.contains("open"); document.querySelectorAll(".cmenu.open").forEach(x => x.classList.remove("open")); if (abrir) m.classList.add("open"); },
   "curso-fav"(d) { const id = idNum(d), f = new Set(favoritos()); f.has(id) ? f.delete(id) : f.add(id); guardarLocal("fav_" + yo.id, JSON.stringify([...f])); render(); },
+  "tarea-abrir"(d) { abrirDlg(htmlTarea(idNum(d))); },
+  async "tarea-borrar"(d) {
+    if (!confirm("¿Eliminar esta tarea con todo su material y las entregas de los alumnos? No se puede deshacer.")) return;
+    try { await rpc("eliminar_tarea", { p_id: idNum(d) }); await recargarTareas(); cerrarDlg(); repintarTareas(); toast("Tarea eliminada."); } catch (e) { toast(e.message); }
+  },
+  async "archivo-bajar"(d) { try { await bajarArchivo(idNum(d)); } catch (e) { toast(e.message); } },
+  async "archivo-borrar"(d) {
+    if (!confirm("¿Eliminar este archivo?")) return;
+    try { await rpc("eliminar_archivo", { p_id: idNum(d) }); await recargarTareas(); repintarTareas(); toast("Archivo eliminado."); } catch (e) { toast(e.message); }
+  },
   async "activar-per"(d) {
     const c = cursoDe(Number(d.c)), p = periodoDe(Number(d.p)); if (!c || !p) return;
     const on = d.on === "1";
@@ -1535,6 +1643,7 @@ const acciones = {
   async "curso-tab"(d) {
     const c = cursoDe(Number(d.c)); if (!c) return;
     $("#dlgBody").innerHTML = htmlCurso(c, d.id);
+    if (d.id === "tareas") { try { await recargarTareas(); repintarTareas(); } catch {} return; }
     if (d.id !== "personas") return;
     try {   // datos frescos: el docente o los compañeros pudieron agregarse después de abrir la sesión
       const [dc, ins, pe, e] = await Promise.all([sel("docente_cursos?select=docente_id,curso_id"), selTodo("inscripciones?select=estudiante_id,curso_id&order=estudiante_id,curso_id"),
@@ -1861,7 +1970,15 @@ document.addEventListener("submit", ev => {
   ev.preventDefault(); const f = ev.target, d = Object.fromEntries(new FormData(f));
   const falla = m => { throw new Error(m); };
   conBoton(f, async err => {
-    if (f.id === "fLogin") {
+    if (f.id === "fTarea") {
+      await rpc("crear_tarea", { p_curso: Number(d.curso), p_titulo: d.titulo, p_descripcion: d.descripcion || "", p_limite: d.limite ? new Date(d.limite).toISOString() : null });
+      await recargarTareas(); repintarTareas(); toast("Carpeta de tarea creada.");
+    } else if (f.classList.contains("fSubida")) {
+      const file = f.archivo.files[0]; if (!file) falla("Elige un archivo.");
+      if (file.size > MAX_ARCHIVO) falla("El archivo pesa " + fmtTam(file.size) + ": el máximo es 4 MB.");
+      await rpc("subir_archivo", { p_curso: Number(f.dataset.c), p_tarea: f.dataset.t ? Number(f.dataset.t) : null, p_tipo: f.dataset.tipo, p_nombre: file.name, p_mime: file.type || "", p_contenido: await leerBase64(file) });
+      await recargarTareas(); repintarTareas(); toast(f.dataset.tipo === "entrega" ? "Tarea entregada." : "Documento subido.");
+    } else if (f.id === "fLogin") {
       await iniciarSesion(d.usuario, d.clave); await entrar(); conTransicion(render);
     } else if (f.id === "fActivar") {
       if (d.a !== d.b) falla("Las contraseñas no coinciden.");
