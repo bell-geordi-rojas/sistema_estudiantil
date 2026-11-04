@@ -143,6 +143,14 @@ dialog::backdrop{background:rgba(10,14,24,.55)}
 .cmenu.open{display:block}
 .cmenu button{display:block;width:100%;text-align:left;border:0;background:none;color:var(--ink);font:inherit;padding:9px 10px;border-radius:7px;cursor:pointer}
 .cmenu button:hover{background:var(--hover)}
+.acc{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:var(--side)}
+.acc summary{cursor:pointer;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:10px;list-style:none;font-weight:600}
+.acc summary::-webkit-details-marker{display:none}
+.acc summary small{margin-left:auto;font-weight:400}
+.acc summary::after{content:"▾";color:var(--mute)}
+.acc[open] summary::after{content:"▴"}
+.acc .cuerpo{padding:0 14px 12px}
+.acc.vacio summary{opacity:.65}
 .res{display:grid;gap:6px;margin-top:6px}
 .res button{text-align:left;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:9px 12px;border-radius:8px;font:inherit;cursor:pointer}
 .res button.on{border-color:var(--teal);background:var(--chip-on)}
@@ -887,7 +895,7 @@ const dlg = $("#dlg");
 function abrirDlg(html) { $("#dlgBody").innerHTML = html; if (!dlg.open) dlg.showModal(); }
 function cerrarDlg() { if (dlg.open) dlg.close(); detalleId = null; $("#dlgBody").innerHTML = ""; }
 dlg.addEventListener("click", ev => { if (ev.target === dlg) cerrarDlg(); });
-dlg.addEventListener("close", () => { detalleId = null; $("#dlgBody").innerHTML = ""; });   // también al cerrar con Esc
+dlg.addEventListener("close", () => { if (dlg.open) return; detalleId = null; $("#dlgBody").innerHTML = ""; });   // también al cerrar con Esc
 function renderDetalle() {
   const e = est.find(x => x.id === detalleId); if (!e) { cerrarDlg(); return; }
   const staff = esStaff(), eNotas = staff && permisos.editar_notas, eDatos = staff && permisos.editar_estudiantes, eDel = staff && permisos.eliminar;
@@ -942,20 +950,28 @@ const acciones = {
   "curso-fav"(d) { const id = idNum(d), f = new Set(favoritos()); f.has(id) ? f.delete(id) : f.add(id); guardarLocal("fav_" + yo.id, JSON.stringify([...f])); render(); },
   "curso-ver"(d) {
     const c = cursoDe(idNum(d)); if (!c) return;
-    let cuerpo;
-    if (yo.rol === "alumno") {
-      const e = est.find(x => x.perfil_id === yo.id), ns = e ? e.deCurso(c.id) : [];
-      cuerpo = ns.length ? `<div class="scroll"><table><thead><tr><th>${nomPeriodo(yo.institucion.tipo)}</th><th>Nombre</th><th>Nota</th>${esUni() ? "<th>Peso</th>" : ""}<th>Comentario</th></tr></thead><tbody>` +
-        ns.map(n => `<tr><td>${esc((periodoDe(n.periodo) || {}).nombre || "—")}</td><td>${n.titulo ? esc(n.titulo) : "<small>—</small>"}</td><td><span class="note">${n.v}</span></td>${esUni() ? `<td>${n.peso}</td>` : ""}<td>${n.comentario ? esc(n.comentario) : "<small>—</small>"}</td></tr>`).join("") +
-        `</tbody></table></div><p style="margin:12px 0 0">${esUni() ? "Promedio ponderado" : "Promedio"} del curso: <b>${fmt(mediaPond(ns))}</b></p>` : `<div class="empty">Aún no tienes notas en este curso.</div>`;
-    } else {
-      cuerpo = est.length ? `<div class="scroll"><table><thead><tr><th>Estudiante</th><th>Notas</th><th>Promedio</th><th></th></tr></thead><tbody>` +
-        est.map(e => { const ns = e.deCurso(c.id); return `<tr><td><div class="who">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div>${esc(e.nombre)}<small>${esc(e.codigo)}</small></div></div></td><td>${ns.length}</td><td>${ns.length ? `<b>${fmt(mediaPond(ns))}</b>` : "–"}</td>
-          <td><button class="btn sm sec" data-a="ver" data-id="${e.id}">Ver / editar</button></td></tr>`; }).join("") + `</tbody></table></div>` : `<div class="empty">No hay estudiantes todavía.</div>`;
-    }
-    abrirDlg(`<div class="banw" style="margin:-18px -18px 14px">${bannerCurso(c.id)}</div><div class="dhead"><div><b>${esc(c.nombre)}</b><small>${esc(periodoSel ? periodoDe(periodoSel).nombre : "Todos los " + nomPeriodos(yo.institucion.tipo))}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>${cuerpo}`);
-  },
-  "foto-elegir"() { $("#fotoIn").click(); },
+    const alumno = yo.rol === "alumno", mio = alumno ? est.find(x => x.perfil_id === yo.id) : null, ps = periodosDe(c.institucion_id);
+    // un dato por periodo (trimestre o ciclo): sección desplegable con sus notas (alumno) o sus estudiantes (personal)
+    const datos = ps.map(p => ({ p, ns: alumno ? (mio ? mio.deCurso(c.id, p.id) : []) : est.flatMap(e => e.deCurso(c.id, p.id)) }));
+    const abierto = periodoSel || (datos.find(x => x.ns.length) || {}).p?.id;
+    const secciones = datos.map(({ p, ns }) => {
+      let cuerpo;
+      if (alumno) {
+        cuerpo = ns.length ? `<div class="scroll"><table><thead><tr><th>Nombre</th><th>Nota</th>${esUni() ? "<th>Peso</th>" : ""}<th>Comentario</th></tr></thead><tbody>` +
+          ns.map(n => `<tr><td>${n.titulo ? esc(n.titulo) : "<small>—</small>"}</td><td><span class="note">${n.v}</span></td>${esUni() ? `<td>${n.peso}</td>` : ""}<td>${n.comentario ? esc(n.comentario) : "<small>—</small>"}</td></tr>`).join("") + `</tbody></table></div>`
+          : `<div class="empty">Aún no tienes notas en este ${nomPeriodo(yo.institucion.tipo).toLowerCase()}.</div>`;
+      } else {
+        cuerpo = est.length ? `<div class="scroll"><table><thead><tr><th>Estudiante</th><th>Notas</th><th>Promedio</th><th></th></tr></thead><tbody>` +
+          est.map(e => { const m = e.deCurso(c.id, p.id); return `<tr><td><div class="who">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div>${esc(e.nombre)}<small>${esc(e.codigo)}</small></div></div></td><td>${m.length}</td><td>${m.length ? `<b>${fmt(mediaPond(m))}</b>` : "–"}</td>
+            <td><button class="btn sm sec" data-a="ver" data-id="${e.id}">Ver / editar</button></td></tr>`; }).join("") + `</tbody></table></div>` : `<div class="empty">No hay estudiantes todavía.</div>`;
+      }
+      const resumen = alumno ? (ns.length ? `${ns.length} nota(s) · prom. <b>${fmt(mediaPond(ns))}</b>` : "Sin notas")
+        : (() => { const con = est.filter(e => e.deCurso(c.id, p.id).length); return con.length ? `${con.length} estudiante(s) · prom. <b>${fmt(media(con.map(e => e.promedioCurso(c.id, p.id))))}</b>` : "Sin notas"; })();
+      return `<details class="acc ${ns.length ? "" : "vacio"}" ${p.id === abierto ? "open" : ""}><summary><span>${esc(p.nombre)}</span><small>${resumen}</small></summary><div class="cuerpo">${cuerpo}</div></details>`;
+    }).join("");
+    const total = alumno ? (mio ? mio.deCurso(c.id, null) : []) : [];
+    abrirDlg(`<div class="banw" style="margin:-18px -18px 14px">${bannerCurso(c.id)}</div><div class="dhead"><div><b>${esc(c.nombre)}</b><small>${alumno && total.length ? `${esUni() ? "Promedio ponderado" : "Promedio"} del curso: ${fmt(mediaPond(total))}` : (alumno ? "Sin notas aún" : "Notas por " + nomPeriodo(yo.institucion.tipo).toLowerCase())}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>${secciones || `<div class="empty">Aún no hay ${nomPeriodos(yo.institucion.tipo)} configurados.</div>`}`);
+  },  "foto-elegir"() { $("#fotoIn").click(); },
   async "foto-quitar"() { await rpc("actualizar_mi_foto", { p_foto: null }); delete fotos[yo.id]; yo.foto = null; render(); toast("Foto quitada."); },
   async tema() { setTema(temaActual() === "dark" ? "light" : "dark"); render(); if (detalleId) renderDetalle(); },
   async salir() { cerrarDlg(); salir(); },
