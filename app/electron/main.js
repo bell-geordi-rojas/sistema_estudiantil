@@ -1,11 +1,12 @@
 // Programa de PC: abre la web del sistema en una ventana propia (mismas cuentas, mismos datos).
 // Antes de entrar busca una versión nueva del programa; si la hay, la descarga, se instala sola y se vuelve a abrir.
-const { app, BrowserWindow, Menu, shell } = require("electron");
+const { app, BrowserWindow, Menu, shell, session } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("path");
 
 const URL_APP = "https://bell786u-ctrl.github.io/sistema_estudiantil/";
 const ORIGEN = new URL(URL_APP).origin;
+const seguro = u => /^https:\/\//i.test(u);   // solo se abren enlaces https fuera del programa
 
 if (!app.requestSingleInstanceLock()) app.quit();
 
@@ -38,6 +39,15 @@ function buscarActualizacion() {
 
 async function crear() {
   Menu.setApplicationMenu(null);
+  // Seguridad: la página no puede pedir permisos del equipo (cámara, ubicación…) y sus respuestas llevan cabeceras de protección
+  const ses = session.defaultSession;
+  ses.setPermissionRequestHandler((_wc, _permiso, cb) => cb(false));
+  ses.setPermissionCheckHandler(() => false);
+  ses.webRequest.onHeadersReceived((det, cb) => {
+    const h = { ...det.responseHeaders };
+    if (det.url.startsWith(ORIGEN)) { h["X-Content-Type-Options"] = ["nosniff"]; h["Referrer-Policy"] = ["no-referrer"]; h["X-Frame-Options"] = ["DENY"]; h["Content-Security-Policy"] = ["frame-ancestors 'none'"]; }
+    cb({ responseHeaders: h });
+  });
   // Abre ya las conexiones al sistema y a la base de datos mientras se busca la actualización
   try { const s = require("electron").session.defaultSession; s.preconnect({ url: ORIGEN, numSockets: 2 }); s.preconnect({ url: "https://tikpnokwqkofitguvpdx.supabase.co", numSockets: 4 }); } catch {}
   win = new BrowserWindow({
@@ -49,9 +59,10 @@ async function crear() {
   // y para exigir la actualización cuando haya una versión nueva que este programa no pudo instalar solo
   win.webContents.setUserAgent(win.webContents.getUserAgent() + " EstudiantilApp/" + app.getVersion());
   // Todo lo que no sea el sistema se abre en el navegador
-  win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: "deny" }; });
+  win.webContents.setWindowOpenHandler(({ url }) => { if (seguro(url)) shell.openExternal(url); return { action: "deny" }; });
+  win.webContents.on("will-attach-webview", e => e.preventDefault());
   win.webContents.on("will-navigate", (e, url) => {
-    if (!url.startsWith(ORIGEN) && !url.startsWith("file://")) { e.preventDefault(); shell.openExternal(url); }
+    if (!url.startsWith(ORIGEN) && !url.startsWith("file://")) { e.preventDefault(); if (seguro(url)) shell.openExternal(url); }
   });
   // Sin internet: pantalla local con botón para reintentar
   win.webContents.on("did-fail-load", (_e, codigo, _desc, url, principal) => {

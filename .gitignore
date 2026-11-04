@@ -9,3 +9,11 @@ app/android/android/
 app/android/SINEVA.apk
 
 *.pfx
+
+.env
+.env.*
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key

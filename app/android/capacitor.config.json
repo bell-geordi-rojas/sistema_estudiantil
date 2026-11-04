@@ -6,6 +6,7 @@
   "server": {
     "url": "https://bell786u-ctrl.github.io/sistema_estudiantil/",
     "cleartext": false,
+    "allowNavigation": ["bell786u-ctrl.github.io"],
     "errorPath": "offline.html"
   },
   "android": {

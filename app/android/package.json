@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "@capacitor/android": "6.2.0",
-    "@capacitor/core": "6.2.0"
+    "@capacitor/android": "6.2.3",
+    "@capacitor/core": "6.2.3"
   },
   "devDependencies": {
     "@capacitor/assets": "3.0.5",
-    "@capacitor/cli": "6.2.0"
+    "@capacitor/cli": "6.2.3"
   }
 }

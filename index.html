@@ -190,6 +190,8 @@ html.vt-pagina main{view-transition-name:contenido}
 .cm .mini{font-size:20px;opacity:.8;padding:4px 8px}
 .cmenu{display:none;position:absolute;right:10px;bottom:38px;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 26px rgba(0,0,0,.35);min-width:170px;padding:5px;z-index:20}
 .cmenu.open{display:block}
+#avisoCookies{position:fixed;left:16px;right:16px;bottom:16px;max-width:620px;margin:0 auto;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;gap:14px;align-items:center;z-index:60;box-shadow:0 8px 28px rgba(0,0,0,.3)}
+#avisoCookies p{margin:0;font-size:13px;flex:1}
 .cmenu button{display:block;width:100%;text-align:left;border:0;background:none;color:var(--ink);font:inherit;padding:9px 10px;border-radius:7px;cursor:pointer}
 .cmenu button:hover{background:var(--hover)}
 .acc{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:var(--side)}
@@ -498,7 +500,8 @@ async function authPost(ruta, cuerpo) {
   return j;
 }
 async function iniciarSesion(usuario, clave) {
-  fijarSesion(await authPost("/auth/v1/token?grant_type=password", { email: emailDe(usuario), password: clave }));
+  try { fijarSesion(await authPost("/auth/v1/token?grant_type=password", { email: emailDe(usuario), password: clave })); }
+  catch (e) { authPost("/rest/v1/rpc/registrar_fallo_login", { p_usuario: usuarioDe(usuario) }).catch(() => {}); throw e; }   // queda en el panel de seguridad del dueño
 }
 async function activarCuenta(usuario, codigo, clave) {
   usuario = usuarioDe(usuario);
@@ -628,12 +631,15 @@ async function cargarDatos(adelantadas) {
   recargarExtra().then(() => { if (yo && !dlg.open && ["panel", "grados", "anuncios", "directorio"].includes(vista)) render(); }).catch(() => {});
 }
 // Grados, anuncios y avisos personales (se piden aparte: no retrasan la entrada)
+const SEL_EVENTOS = "eventos_seguridad?select=id,tipo,gravedad,usuario,detalle,ip,creado&order=creado.desc&limit=300";
+let eventos = [], accesos = [];
+const altas24 = () => eventos.filter(e => e.gravedad === "alta" && Date.now() - new Date(e.creado) < 864e5).length;
 const SEL_NOTIFS = "notificaciones?select=id,mensaje,leida,creado&order=creado.desc&limit=50";
 async function recargarExtra() {
   const q = p => sel(p).catch(() => []);
-  const [g, dg, an, no] = await Promise.all([q("grados?select=id,institucion_id,nombre,orden&order=orden,id"), q("docente_grados?select=docente_id,grado_id"),
-    q("anuncios?select=id,institucion_id,titulo,cuerpo,para,creado&order=creado.desc&limit=30"), q(SEL_NOTIFS)]);
-  grados = g; docGrados = dg; anuncios = an; notifs = no; pintarCampana();
+  const [g, dg, an, no, ev] = await Promise.all([q("grados?select=id,institucion_id,nombre,orden&order=orden,id"), q("docente_grados?select=docente_id,grado_id"),
+    q("anuncios?select=id,institucion_id,titulo,cuerpo,para,creado&order=creado.desc&limit=30"), q(SEL_NOTIFS), yo && yo.rol === "dueno" ? q(SEL_EVENTOS) : Promise.resolve([])]);
+  grados = g; docGrados = dg; anuncios = an; notifs = no; eventos = ev; pintarCampana();
   if (!tNotif) tNotif = setInterval(() => { if (yo) sel(SEL_NOTIFS).then(r => { notifs = r; pintarCampana(); }).catch(() => {}); }, 60000);
 }
 let tNotif = null;
@@ -827,7 +833,7 @@ function vistasDisponibles() {
   if (puedeCursos()) v.push(["config", "▣", tituloConfig()]);
   if (r === "admin") v.push(["correo", "✉", "Correo institucional"]);
   if (puedeGestionar() && !(r === "docente" && porCurso())) { v.push(["usuarios", "☺", "Cuentas y permisos"]); v.push(["solicitudes", "✉", "Solicitudes"]); v.push(["invitar", "＋", tituloRegistro()]); }
-  if (r === "dueno") { v.push(["instituciones", "⌂", "Instituciones"]); v.push(["carpetas", "▤", "Carpetas"]); }
+  if (r === "dueno") { v.push(["instituciones", "⌂", "Instituciones"]); v.push(["carpetas", "▤", "Carpetas"]); v.push(["seguridad", "⛨", "Seguridad"]); }
   v.push(["cuenta", "⚙", "Mi cuenta"]);
   if (!EN_APP) v.push(["descargar", "⬇", "Descargar sistema"]);
   return v;
@@ -1380,7 +1386,7 @@ function pantallaApp() {
     { id: "pers", i: "☺", n: "Personas", v: ["directorio", "lista", "usuarios", "solicitudes", "invitar", "buscar"] },
     { id: "misn", i: "★", n: "Mis notas", v: ["mis", "comentarios"] },
     { id: "nota", i: "✎", n: "Calificaciones", v: ["calificar", "estadisticas"] },
-    { id: "inss", i: "⌂", n: "Instituciones", v: ["instituciones", "carpetas"] },
+    { id: "inss", i: "⌂", n: "Instituciones", v: ["instituciones", "carpetas", "seguridad"] },
     { id: "cuen", i: "⚙", n: "Mi cuenta", v: ["cuenta", "descargar"] },
   ];
   const dispo = new Map(vs.map(v => [v[0], v])), usados = new Set(), items = [];
@@ -1393,12 +1399,12 @@ function pantallaApp() {
   }
   const actual = items.find(it => it.m.includes(vista));
   const pestanas = actual && actual.m.length > 1 ? `<div class="tabs" style="flex-wrap:wrap;max-width:760px">${actual.m.map(k => `<button class="${k === vista ? "on" : ""}" data-v="${k}">${dispo.get(k)[2]}${k === "solicitudes" && solic.length ? ` <span class="badge" style="display:inline-block;background:var(--red);color:#fff;border-radius:10px;padding:0 7px;font-size:11px">${solic.length}</span>` : ""}</button>`).join("")}</div>` : "";
-  const nav = items.map(it => `<button class="${it.m.includes(vista) ? "on" : ""}" data-v="${it.k}"><span>${it.i}</span>${it.n}${it.m.includes("solicitudes") && solic.length ? `<span class="badge">${solic.length}</span>` : ""}</button>`).join("") +
+  const nav = items.map(it => `<button class="${it.m.includes(vista) ? "on" : ""}" data-v="${it.k}"><span>${it.i}</span>${it.n}${it.m.includes("solicitudes") && solic.length ? `<span class="badge">${solic.length}</span>` : ""}${it.m.includes("seguridad") && altas24() ? `<span class="badge">${altas24()}</span>` : ""}</button>`).join("") +
     (esStaff() && (permisos.exportar || permisos.registrar_estudiantes) ? `<hr class="sep">${permisos.exportar ? `<button data-a="export"><span>⇩</span>Exportar .csv</button>` : ""}${permisos.registrar_estudiantes ? `<button data-a="import"><span>⇧</span>Importar .csv</button>` : ""}` : "");
   let cuerpo;
   if (avisoCarga) cuerpo = `<div class="card"><h2>No se pudieron cargar los datos</h2><p class="err">${esc(avisoCarga)}</p><button class="btn" data-a="reintentar">Reintentar</button></div>`;
   else cuerpo = { panel: vPanel, mis: vMis, lista: vLista, registrar: vRegistrar, calificar: vCalificar, buscar: vBuscar, estadisticas: vEstadisticas,
-    usuarios: vUsuarios, solicitudes: vSolicitudes, invitar: vInvitar, instituciones: vInstituciones, carpetas: vCarpetas, tareas: vTareas, cuenta: vCuenta, config: vConfig, comentarios: vComentarios, grados: vGrados, anuncios: vAnuncios, directorio: vDirectorio, descargar: vDescargar, cursos: vCursos, correo: vCorreo, asignaciones: vAsignaciones, inscripciones: vInscripciones, carreras: vCarreras }[vista]();
+    usuarios: vUsuarios, solicitudes: vSolicitudes, invitar: vInvitar, instituciones: vInstituciones, carpetas: vCarpetas, tareas: vTareas, cuenta: vCuenta, config: vConfig, comentarios: vComentarios, grados: vGrados, anuncios: vAnuncios, directorio: vDirectorio, seguridad: vSeguridad, descargar: vDescargar, cursos: vCursos, correo: vCorreo, asignaciones: vAsignaciones, inscripciones: vInscripciones, carreras: vCarreras }[vista]();
   if (!avisoCarga && vista === "panel") cuerpo = tarjetaAnuncios() + cuerpo;
   const aviso = yo.rol === "dueno" && yo.mantenimiento ? `<div class="msg warn" style="border-radius:0;text-align:center">⚠ El sistema está en mantenimiento: solo tú puedes usarlo. Reanúdalo en «Instituciones».</div>` : "";
   return `${cabecera(true, nav)}${aviso}<div class="layout"><nav>${nav}</nav><main>${pestanas}<div id="main">${cuerpo}</div></main></div>`;
@@ -1409,6 +1415,7 @@ function render() {
 }
 function irA(v) {
   if (v === "registrar") borrador = []; vista = v; conTransicion(render);
+  if (v === "seguridad") Promise.all([recargarExtra(), rpc("ultimos_accesos").then(r => { accesos = r || []; }).catch(() => {})]).then(() => { if (vista === v && !dlg.open) render(); }).catch(() => {});
   if (["grados", "anuncios", "directorio", "panel"].includes(v)) recargarExtra().then(() => { if (vista === v && !dlg.open) render(); }).catch(() => {});
   if (v === "tareas") recargarTareas().then(() => { if (vista === "tareas") repintarTareas(); }).catch(() => {});   // datos frescos al abrir
 }
@@ -1507,7 +1514,7 @@ function mostrarCredenciales(v, titulo = "Cuenta creada") {
     <div><span>Código de activación</span><code>${esc(v.codigo)}</code><button class="btn sm sec" data-a="copiar" data-t="${esc(v.codigo)}">Copiar</button></div></div>
     ${v.clave_google ? `<p class="msg">Se está creando la cuenta real de Google <b>${esc(v.correo_institucional || "")}</b> con esa contraseña temporal (Google pedirá cambiarla al entrar). Si no se puede crear, la cuenta administradora recibe un aviso por correo con el motivo.</p>` : ""}
     ${v.correo_personal ? (v.enviado ? `<p class="msg">✔ Se enviaron las credenciales a <b>${esc(v.correo_personal)}</b>.</p>` : `<p class="msg warn">No se pudo enviar el correo a <b>${esc(v.correo_personal)}</b> (el envío no está configurado o falló). Entrégale las credenciales tú.</p>`) : ""}
-    <p class="msg warn">Guarda el código ahora: por seguridad no se vuelve a mostrar (si se pierde, genera uno nuevo en «Cuentas y permisos»). La persona debe entrar en <b>Activar cuenta</b> y crear su contraseña.</p>
+    <p class="msg warn">Guarda el código ahora: por seguridad no se vuelve a mostrar y <b>caduca a los 7 días</b> (si se pierde o vence, genera uno nuevo en «Cuentas y permisos»). La persona debe entrar en <b>Activar cuenta</b> y crear su contraseña.</p>
     <button class="btn" data-a="copiar" data-t="Usuario: ${esc(v.correo_institucional || v.usuario)}  Código: ${esc(v.codigo)}${v.clave_google ? "  Contraseña de Google: " + esc(v.clave_google) : ""}">Copiar usuario y código</button>`);
 }
 function abrirPermisos(p) {
@@ -1682,6 +1689,34 @@ function vDirectorio() {
     return `<div class="card"><h2>${esc(i.nombre)} <small>${etiquetaTipo(i)} · ${pe.length} alumno(s) · ${docs.length} docente(s)</small></h2>${cuerpo}</div>`;
   }).join("");
 }
+/* ===== Seguridad (dueño): actividad sospechosa y acciones delicadas ===== */
+const EVENTO_TXT = { login_fallido: "Inicio de sesión fallido", login_sospechoso: "Intentos de acceso sospechosos", login: "Inicio de sesión", activacion_fallida: "Código de activación incorrecto",
+  activacion_bloqueada: "Usuario bloqueado por intentos", cuenta_activada: "Cuenta activada", codigo_regenerado: "Código nuevo generado", contrasena_restablecida: "Contraseña restablecida",
+  rol_cambiado: "Rol cambiado", cuenta_reactivada: "Cuenta reactivada", cuenta_desactivada: "Cuenta desactivada", permisos_cambiados: "Permisos cambiados", cuenta_eliminada: "Cuenta eliminada",
+  institucion_eliminada: "Institución eliminada", mantenimiento_activado: "Mantenimiento activado", mantenimiento_desactivado: "Mantenimiento desactivado", correo_configurado: "Correo configurado",
+  estudiante_eliminado: "Estudiante eliminado", limite_alcanzado: "Límite de peticiones alcanzado" };
+let segFiltro = "";
+function vSeguridad() {
+  const hoy = eventos.filter(e => Date.now() - new Date(e.creado) < 864e5), n = g => hoy.filter(e => e.gravedad === g).length;
+  const fallos = hoy.filter(e => /fallid/.test(e.tipo)).length, bloqueados = [...new Set(eventos.filter(e => e.tipo === "activacion_bloqueada" && Date.now() - new Date(e.creado) < 9e5).map(e => e.usuario))];
+  const lista = eventos.filter(e => !segFiltro || e.gravedad === segFiltro).slice(0, 150);
+  const pill = g => `<span class="pill ${g === "alta" ? "no" : g === "aviso" ? "na" : "ok"}" style="min-width:48px">${g === "alta" ? "Alta" : g === "aviso" ? "Aviso" : "Info"}</span>`;
+  return `<div class="kpis"><div class="kpi"><span>Eventos (24 h)</span><b>${hoy.length}</b></div><div class="kpi"><span>Alertas altas</span><b style="color:${n("alta") ? "var(--red)" : "inherit"}">${n("alta")}</b></div>
+    <div class="kpi"><span>Avisos</span><b>${n("aviso")}</b></div><div class="kpi"><span>Intentos fallidos</span><b>${fallos}</b></div><div class="kpi"><span>Bloqueados ahora</span><b>${bloqueados.length}</b></div></div>
+    ${bloqueados.length ? `<p class="msg warn">Usuarios bloqueados 15 minutos por demasiados intentos: <b>${bloqueados.map(esc).join(", ")}</b>.</p>` : ""}
+    <div class="card"><h2>Actividad registrada <select id="segFiltro" aria-label="Filtrar por gravedad"><option value="">Todas</option><option value="alta" ${segFiltro === "alta" ? "selected" : ""}>Solo alertas altas</option><option value="aviso" ${segFiltro === "aviso" ? "selected" : ""}>Avisos</option><option value="info" ${segFiltro === "info" ? "selected" : ""}>Informativos</option></select></h2>
+    ${lista.length ? `<div class="scroll"><table><thead><tr><th>Fecha</th><th></th><th>Evento</th><th>Usuario</th><th>Detalle</th><th>IP</th></tr></thead><tbody>${lista.map(e => `<tr><td style="white-space:nowrap">${fechaHora(e.creado)}</td><td>${pill(e.gravedad)}</td><td>${esc(EVENTO_TXT[e.tipo] || e.tipo)}</td><td>${esc(e.usuario || "—")}</td><td>${esc(e.detalle || "")}</td><td><small>${esc(e.ip || "")}</small></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Sin eventos${segFiltro ? " de este tipo" : " todavía"}.</div>`}</div>
+    <div class="card"><h2>Últimos accesos <small>${accesos.length}</small></h2>${accesos.length ? `<div class="scroll"><table><thead><tr><th>Usuario</th><th>Rol</th><th>Institución</th><th>Último acceso</th></tr></thead><tbody>${accesos.map(a => `<tr><td>${esc(a.usuario)}</td><td>${esc(ROL[a.rol] || a.rol)}</td><td>${esc(a.institucion || "—")}</td><td>${a.ultimo_acceso ? fechaHora(a.ultimo_acceso) : "<small>Nunca</small>"}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Sin datos.</div>`}</div>`;
+}
+/* ===== Aviso de almacenamiento (cookies): la página solo guarda lo necesario en el navegador ===== */
+function avisoAlmacenamiento() {
+  let visto = false; try { visto = localStorage.getItem("aviso_ok") === "1"; } catch {}
+  if (visto) return;
+  const d = document.createElement("div"); d.id = "avisoCookies"; d.setAttribute("role", "dialog"); d.setAttribute("aria-label", "Aviso de cookies");
+  d.innerHTML = `<p>SINEVA guarda en tu navegador solo lo necesario: tu sesión y tus preferencias (tema y efectos). No usa cookies de publicidad ni de seguimiento y no comparte tus datos con terceros.</p><button class="btn" data-a="aviso-ok">Aceptar</button>`;
+  document.body.appendChild(d);
+}
+avisoAlmacenamiento();
 /* ===== Tareas: el docente crea carpetas con material y los alumnos entregan su trabajo (PDF o Word) ===== */
 const SEL_TAREAS = ["tareas?select=id,curso_id,docente_id,titulo,descripcion,limite,creado&order=creado.desc",
   "tarea_archivos?select=id,curso_id,tarea_id,tipo,estudiante_id,subido_por,nombre,mime,tam,creado&order=creado"];
@@ -1818,6 +1853,7 @@ const acciones = {
   },
   async "gra-doc-todos"(d) { try { await rpc("asignar_docente_grado", { p_docente: d.d, p_grado: Number(d.g), p_asignar: d.on === "1" }); await refrescarGrados(); toast(d.on === "1" ? "Cursos asignados al docente." : "Cursos quitados al docente."); } catch (e) { toast(e.message); } },
   async "anuncio-del"(d) { if (!confirm("¿Quitar este anuncio?")) return; try { await rpc("eliminar_anuncio", { p_id: idNum(d) }); await recargarExtra(); render(); toast("Anuncio quitado."); } catch (e) { toast(e.message); } },
+  "aviso-ok"() { guardarLocal("aviso_ok", "1"); const e = $("#avisoCookies"); if (e) e.remove(); },
   "tarea-abrir"(d) { abrirDlg(htmlTarea(idNum(d))); },
   async "tarea-borrar"(d) {
     if (!confirm("¿Eliminar esta tarea con todo su material y las entregas de los alumnos? No se puede deshacer.")) return;
@@ -2123,6 +2159,7 @@ document.addEventListener("change", ev => {
   else if (t.id === "invRol" || t.id === "invInst") actualizarFormInvitar();
   else if (t.id === "perSel") { periodoSel = t.value ? Number(t.value) : null; conTransicion(render); if (detalleId) renderDetalle(); }
   else if (t.id === "perCal") repintarCal();
+  else if (t.id === "segFiltro") { segFiltro = t.value; $("#main").innerHTML = vSeguridad(); }
   else if (t.id === "instWs") { const dom = $("#instDom"); dom.required = t.value === "si"; if (t.value === "si") dom.focus(); }
   else if (t.id === "mInst" || t.id === "mRol") {
     masivo.texto = $("#masTexto").value; masivo.orden = $("#fMas").orden.value;
@@ -2185,7 +2222,7 @@ document.addEventListener("submit", ev => {
       await rpc("subir_archivo", { p_curso: Number(f.dataset.c), p_tarea: f.dataset.t ? Number(f.dataset.t) : null, p_tipo: f.dataset.tipo, p_nombre: file.name, p_mime: file.type || "", p_contenido: await leerBase64(file) });
       await recargarTareas(); repintarTareas(); toast(f.dataset.tipo === "entrega" ? "Tarea entregada." : "Documento subido.");
     } else if (f.id === "fLogin") {
-      await iniciarSesion(d.usuario, d.clave); await entrar(); conTransicion(render);
+      await iniciarSesion(d.usuario, d.clave); await entrar(); conTransicion(render); rpc("registrar_acceso").catch(() => {});
     } else if (f.id === "fActivar") {
       if (d.a !== d.b) falla("Las contraseñas no coinciden.");
       if (!claveValida(d.a)) falla("La contraseña debe tener al menos 8 caracteres, con letras y números.");

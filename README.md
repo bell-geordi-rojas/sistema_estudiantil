@@ -82,3 +82,7 @@ El APK se firma con una clave permanente guardada en los *secrets* de GitHub (`A
 - La clave de index.html es la publica (publishable): sirve para llegar a la base, que protege cada fila con reglas (RLS). La clave secreta (service_role) no esta ni estuvo nunca en el repositorio.
 - Base de datos: todas las tablas con RLS; sin sesion no se lee ni escribe ninguna tabla; con sesion solo se lee y todo cambio pasa por las funciones del sistema; las claves de correo (config) no se pueden leer; solo 4 funciones son publicas; tiempo maximo por consulta.
 - Contrasenas: minimo 8, con letras y numeros. Los codigos de activacion se bloquean 15 minutos tras 8 intentos fallidos.
+- Registro de actividad (solo el dueno, en «Seguridad»): inicios de sesion fallidos y exitosos, codigos de activacion incorrectos y bloqueos, cambios de rol, permisos, contrasenas y cuentas, eliminaciones, mantenimiento y correo. Hay limites de peticiones por persona o por IP en las acciones publicas y en las que se pueden abusar.
+- Los codigos de activacion caducan a los 7 dias. No hay enlaces de recuperacion por correo: las contrasenas las restablece el administrador.
+- Aviso de almacenamiento (cookies) al entrar. La sesion se guarda en el navegador (no en cookies); la pagina no usa cookies.
+- Dependencias actualizadas (Electron 45, electron-builder 26, Capacitor 6.2.3) y archivos antiguos sin uso (api.php, sistema_estudiantes.cpp) retirados.
