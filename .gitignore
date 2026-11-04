@@ -7,3 +7,5 @@ app/**/node_modules/
 app/electron/dist/
 app/android/android/
 app/android/Estudiantil.apk
+
+*.pfx

@@ -160,6 +160,18 @@ const DESCARGAS = {
   pc: "https://github.com/bell786u-ctrl/sistema_estudiantil/releases/download/app-latest/Estudiantil-Setup.exe",
 };
 const EN_APP = /EstudiantilApp/.test(navigator.userAgent);   // dentro del programa de PC o de Android no se ofrece la descarga
+const VERSION_APP = (navigator.userAgent.match(/EstudiantilApp\/([\d.]+)/) || [])[1] || (EN_APP ? "0.0.0" : "");   // versión del programa instalado
+const OS_APP = /Android/i.test(navigator.userAgent) ? "android" : "pc";
+const cmpVer = (a, b) => { const x = String(a).split(".").map(Number), y = String(b).split(".").map(Number); for (let i = 0; i < 3; i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d; } return 0; };
+let actualizacion = null;   // si no es null, el programa está desactualizado y no se puede usar hasta actualizar
+async function comprobarActualizacion() {
+  if (!EN_APP) return;
+  try {
+    const r = await fetch("actualizacion.json?t=" + Date.now(), { cache: "no-store" }); if (!r.ok) return;
+    const j = await r.json();
+    if (j && j.requerida && cmpVer(VERSION_APP, j.requerida) < 0 && !actualizacion) { actualizacion = j; render(); }
+  } catch {}
+}
 const PESOS = [1, 2, 3, 4];   // ponderación de una nota (solo universidades); si no se elige vale 1
 const ROL = { dueno: "Dueño", admin: "Administrador", docente: "Docente", alumno: "Alumno" };
 const PERMISOS = {
@@ -721,6 +733,17 @@ function pantallaLogin() {
     <p style="margin:0 0 14px;color:var(--mute)">Sistema de gestión de estudiantes</p>
     ${estadoSis && estadoSis.mantenimiento ? `<p class="msg warn">🔧 ${esc(estadoSis.mensaje || "El sistema está en mantenimiento.")}</p>` : ""}<div class="tabs">${t("ingresar", "Ingresar")}${t("activar", "Activar cuenta")}${t("afiliar", "Afiliarme")}${EN_APP ? "" : t("descargar", "⬇ Descargar")}</div>${cuerpo}</div></div>`;
 }
+function pantallaActualizar() {
+  const a = actualizacion, pc = OS_APP === "pc";
+  return `${cabecera(false)}<div class="login"><div class="card"><div class="logo" style="color:var(--teal);margin-bottom:8px"><img src="logo.png" alt="" width="44" height="44" style="border-radius:8px">ESTUDIANTIL</div>
+    <h2 style="margin:0 0 8px">Actualización obligatoria</h2>
+    <p style="margin:0 0 14px;color:var(--mute)">Hay una versión nueva del programa (<b>${esc(a.requerida)}</b>; tienes la ${esc(VERSION_APP === "0.0.0" ? "anterior" : VERSION_APP)}). Para seguir usando el sistema debes actualizarlo.</p>
+    <a class="btn" href="${esc(a[OS_APP] || DESCARGAS[OS_APP])}" style="display:inline-block;text-decoration:none">⬇ Descargar la actualización</a>
+    <ol style="color:var(--mute);margin:14px 0 0;padding-left:20px;line-height:1.6;font-size:13px">${(pc
+      ? ["Descarga <b>Estudiantil-Setup.exe</b> y cierra este programa antes de instalar.", "Ejecuta el instalador: reemplaza la versión anterior y conserva tus datos.", "Abre <b>Estudiantil</b> de nuevo."]
+      : ["Descarga el archivo <b>Estudiantil.apk</b>.", "Ábrelo e instálalo encima de la versión actual (si Android da error, desinstala la app primero: tus datos están en el servidor y no se pierden).", "Abre <b>Estudiantil</b> de nuevo."]).map(p => `<li>${p}</li>`).join("")}</ol>
+    <button class="btn sec" data-a="recomprobar-version" style="margin-top:14px">Ya actualicé: comprobar de nuevo</button></div></div>`;
+}
 function pantallaBloqueo() {
   return `${cabecera(true)}<div class="login"><div class="card"><h2>Acceso no disponible</h2><p>${esc(yo.motivo || "No tienes acceso en este momento.")}</p><button class="btn" data-a="recomprobar">Volver a comprobar</button> <button class="btn sec" data-a="salir">Salir</button></div></div>`;
 }
@@ -737,6 +760,7 @@ function pantallaApp() {
   return `${cabecera(true, nav)}${aviso}<div class="layout"><nav>${nav}</nav><main id="main">${cuerpo}</main></div>`;
 }
 function render() {
+  if (actualizacion) { cerrarDlg(); $("#root").innerHTML = pantallaActualizar(); return; }
   $("#root").innerHTML = !yo ? pantallaLogin() : !yo.acceso ? pantallaBloqueo() : pantallaApp();
 }
 function irA(v) { if (v === "registrar") borrador = []; vista = v; render(); }
@@ -835,6 +859,7 @@ const acciones = {
   async "b-add"(d) { agregarBorrador(Number(d.c)); },
   async "b-rm"(d) { borrador = borrador.filter(n => n.k !== Number(d.k)); repintarCursos(); },
   async recomprobar() { await entrar(); render(); },
+  async "recomprobar-version"() { actualizacion = null; await comprobarActualizacion(); if (!actualizacion) { render(); toast("Ya tienes la versión necesaria."); } },
   async "curso-ren"(d) {
     const c = cursoDe(idNum(d)), n = await pedir("Nuevo nombre del curso:", c.nombre); if (n === null) return;
     await rpc("renombrar_curso", { p_id: c.id, p_nombre: n }); await recargarTodo(); toast("Curso renombrado.");
@@ -1068,6 +1093,11 @@ function desdeCSV(texto) {
 (async function arrancar() {
   render();
   cargarEstadoSistema();
+  if (EN_APP) {
+    await comprobarActualizacion();
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) comprobarActualizacion(); });   // al volver a la app también se comprueba
+    if (actualizacion) return;
+  }
   if (sesion) {
     try { await entrar(); } catch (e) { cerrarSesionLocal(); yo = null; toast(e.message); }
     render();

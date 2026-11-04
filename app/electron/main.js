@@ -15,8 +15,9 @@ function crear() {
     title: "Estudiantil", icon: path.join(__dirname, "icon.png"), backgroundColor: "#0f1420", autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
-  // La web reconoce esta marca y no ofrece descargar el programa dentro del programa
-  win.webContents.setUserAgent(win.webContents.getUserAgent() + " EstudiantilApp");
+  // La web reconoce esta marca (y la versión instalada) para no ofrecer la descarga dentro del programa
+  // y para exigir la actualización cuando haya una versión nueva
+  win.webContents.setUserAgent(win.webContents.getUserAgent() + " EstudiantilApp/" + app.getVersion());
   // Todo lo que no sea el sistema se abre en el navegador
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: "deny" }; });
   win.webContents.on("will-navigate", (e, url) => {

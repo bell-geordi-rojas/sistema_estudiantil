@@ -33,6 +33,14 @@ Son ventanas que abren la web publicada (mismas cuentas, mismos datos y siempre 
 Los compila GitHub Actions (`.github/workflows/build-apps.yml`, código en `app/`) y los publica en la versión **app-latest**; se recompilan al cambiar `app/` o a mano en *Actions → Compilar programas → Run workflow*.
 El instalador de Windows no tiene firma digital (SmartScreen avisa) y el APK está firmado con clave de depuración (hay que permitir «instalar apps desconocidas»).
 
+### Publicar una versión nueva (actualización obligatoria)
+
+1. Sube el número de `version.json` (p. ej. `1.1.0` → `1.2.0`) y haz commit/push (también se puede ejecutar a mano en *Actions → Compilar programas*).
+2. El workflow compila el instalador y el APK con esa versión, los publica en **app-latest** y al final actualiza `actualizacion.json`.
+3. Desde ese momento, cualquier programa instalado con una versión anterior muestra «Actualización obligatoria» (con el enlace de descarga) en vez del login, y lo vuelve a comprobar cada vez que se abre o vuelve a primer plano.
+Los cambios solo de la web (`index.html`) no necesitan versión nueva: los programas ya cargan siempre la web publicada.
+El APK se firma con una clave permanente guardada en los *secrets* de GitHub (`ANDROID_KEYSTORE_B64` y `ANDROID_KEYSTORE_PASS`); hay copia en `Documents\EstudiantilKeystore`. Si se pierde, los usuarios tendrán que desinstalar la app para actualizar.
+
 ## Puesta en marcha (una sola vez)
 
 1. En Supabase: **Authentication → Sign In / Providers → Email → desactivar «Confirm email»** (las cuentas usan un correo interno).

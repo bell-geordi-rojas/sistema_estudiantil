@@ -1,15 +1,18 @@
 name: Compilar programas
 
 # Genera el instalador de Windows y el .apk de Android y los publica en la versión «app-latest».
-# Se ejecuta a mano (Actions > Compilar programas > Run workflow) o al cambiar la carpeta app/.
+# La versión sale de version.json. Al terminar, publica actualizacion.json: desde ese momento los programas
+# instalados con una versión anterior quedan obligados a actualizarse antes de entrar.
+# Se ejecuta a mano (Actions > Compilar programas > Run workflow) o al cambiar app/ o version.json.
 on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ["app/**", ".github/workflows/build-apps.yml"]
+    paths: ["app/**", "version.json", ".github/workflows/build-apps.yml"]
 
 permissions:
   contents: write
+  pages: write
 
 jobs:
   windows:
@@ -23,6 +26,8 @@ jobs:
         working-directory: app/electron
         shell: bash
         run: |
+          V=$(node -p "require('../../version.json').version")
+          npm version "$V" --no-git-tag-version --allow-same-version
           npm install
           npx electron-builder --win nsis --x64 --publish never
       - uses: actions/upload-artifact@v4
@@ -32,6 +37,8 @@ jobs:
 
   android:
     runs-on: ubuntu-latest
+    env:
+      KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,11 +50,38 @@ jobs:
           java-version: 17
       - name: Compilar APK
         working-directory: app/android
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
         run: |
+          V=$(node -p "require('../../version.json').version")
+          # La versión viaja en el user-agent para que la web sepa si la app está desactualizada
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('capacitor.config.json'));c.android.appendUserAgent='EstudiantilApp/$V';fs.writeFileSync('capacitor.config.json',JSON.stringify(c,null,2))"
           npm install
           npx cap add android
           npx capacitor-assets generate --android --assetPath ../assets --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#ffffff' --splashBackgroundColor '#ffffff' --splashBackgroundColorDark '#ffffff'
           npx cap sync android
+          IFS=. read MA MI PA <<< "$V"
+          CODE=$((MA*10000 + MI*100 + PA))
+          sed -i "s/versionCode 1/versionCode $CODE/; s/versionName \"1.0\"/versionName \"$V\"/" android/app/build.gradle
+          # Firma permanente: sin ella Android no deja instalar una versión nueva encima de la anterior
+          echo "$KS_B64" | base64 -d > android/app/estudiantil.pfx
+          ALIAS=$(keytool -list -keystore android/app/estudiantil.pfx -storetype pkcs12 -storepass "$KS_PASS" | grep -i PrivateKeyEntry | head -1 | cut -d, -f1)
+          echo "alias de la firma: $ALIAS"
+          test -n "$ALIAS"
+          export KS_ALIAS="$ALIAS"
+          cat >> android/app/build.gradle <<'EOF'
+          android {
+              signingConfigs {
+                  debug {
+                      storeFile file("estudiantil.pfx")
+                      storeType "pkcs12"
+                      storePassword System.getenv("KS_PASS")
+                      keyAlias System.getenv("KS_ALIAS")
+                      keyPassword System.getenv("KS_PASS")
+                  }
+              }
+          }
+          EOF
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
@@ -64,6 +98,9 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: actions/download-artifact@v4
         with:
           path: salida
@@ -73,3 +110,18 @@ jobs:
           ls -l salida
           gh release view app-latest >/dev/null 2>&1 || gh release create app-latest --title "Programas (última versión)" --notes "Instalador para Windows (Estudiantil-Setup.exe) y APK para Android (Estudiantil.apk). Se actualizan solos al cambiar la carpeta app/."
           gh release upload app-latest salida/Estudiantil-Setup.exe salida/Estudiantil.apk --clobber
+      - name: Exigir la nueva versión a los programas instalados
+        run: |
+          V=$(jq -r .version version.json)
+          B="https://github.com/${GH_REPO}/releases/download/app-latest"
+          jq -n --arg v "$V" --arg a "$B/Estudiantil.apk" --arg p "$B/Estudiantil-Setup.exe" '{requerida:$v, android:$a, pc:$p}' > actualizacion.json
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add actualizacion.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Version obligatoria de los programas: $V"
+            git pull --rebase origin main
+            git push origin main
+          fi
+          # Los cambios hechos con el token del workflow no disparan solos la publicación de la web
+          gh api -X POST "repos/${GH_REPO}/pages/builds" || true
