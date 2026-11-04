@@ -555,12 +555,11 @@ function vistasDisponibles() {
   if (r !== "dueno") v.push(["cursos", "❖", r === "alumno" ? "Mis cursos" : "Cursos"]);
   if (r === "alumno") { v.push(["mis", "★", "Mis notas"]); v.push(["comentarios", "✎", "Mis comentarios"]); if (p.ver_companeros) v.push(["lista", "☰", "Mis compañeros"]); }
   else v.push(["lista", "☰", r === "dueno" ? "Estudiantes (lectura)" : "Estudiantes"]);
-  if (esStaff() && p.registrar_estudiantes) v.push(["registrar", "＋", "Registrar estudiante"]);
   if (esStaff() && p.editar_notas) v.push(["calificar", "✎", "Agregar calificación"]);
   if (r !== "alumno") v.push(["buscar", "⌕", "Buscar por código"]);
   if (r === "dueno" || p.ver_estadisticas) v.push(["estadisticas", "◔", "Estadísticas"]);
   if (puedeCursos()) v.push(["config", "▣", tituloConfig()]);
-  if (puedeGestionar()) { v.push(["usuarios", "☺", "Cuentas y permisos"]); v.push(["solicitudes", "✉", "Solicitudes"]); v.push(["invitar", "✚", "Crear cuenta"]); }
+  if (puedeGestionar()) { v.push(["usuarios", "☺", "Cuentas y permisos"]); v.push(["solicitudes", "✉", "Solicitudes"]); v.push(["invitar", "＋", "Registrar estudiante"]); }
   if (r === "dueno") { v.push(["instituciones", "⌂", "Instituciones"]); v.push(["carpetas", "▤", "Carpetas"]); }
   v.push(["cuenta", "⚙", "Mi cuenta"]);
   if (!EN_APP) v.push(["descargar", "⬇", "Descargar sistema"]);
@@ -578,7 +577,7 @@ function vPanel() {
   }
   const s = stats(est);
   return `<div class="bar"><span class="chip on">${esc(yo.institucion.nombre)} · ${esUni() ? "Universidad" : "Colegio"}</span><span class="chip">${esUni() ? "Promedio ponderado" : "Promedio general"}: ${s.general === null ? "—" : fmt(s.general)}</span>${selPeriodo()}</div>${kpisHTML(s)}
-    <div class="grid"><div><div class="card"><h2>Estudiantes ${esStaff() && permisos.registrar_estudiantes ? `<button class="btn" data-v="registrar">+ Nuevo</button>` : ""}</h2>${filas(est.slice(0, 6), { acciones: false })}</div></div>
+    <div class="grid"><div><div class="card"><h2>Estudiantes ${puedeGestionar() ? `<button class="btn" data-v="invitar">+ Nuevo</button>` : ""}</h2>${filas(est.slice(0, 6), { acciones: false })}</div></div>
     <div><div class="card"><h2>Aprobación</h2>${donut(s.aprobados, s.reprobados, "#0e9aa7", "#c9a8f7")}${leyenda}</div>
     <div class="card"><h2>Promedio por estudiante</h2>${bars(est)}</div></div></div>`;
 }
@@ -703,7 +702,7 @@ function vUsuarios() {
   const pend = invs.length ? `<div class="card"><h2>Cuentas pendientes de activar</h2><div class="scroll"><table><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th></th></tr></thead><tbody>` +
     invs.map(v => `<tr><td>${esc(nombreCompleto(v))}</td><td><code>${esc(v.usuario)}</code></td><td><span class="tag">${ROL[v.rol]}</span></td>
       <td style="white-space:nowrap"><button class="btn sm sec" data-a="regen" data-id="${v.id}">Nuevo código</button> <button class="btn del" data-a="borrar-inv" data-id="${v.id}">Anular</button></td></tr>`).join("") + `</tbody></table></div></div>` : "";
-  return `<div class="card"><h2>Cuentas y permisos <button class="btn" data-v="invitar">+ Crear cuenta</button></h2>${tabla}</div>${pend}`;
+  return `<div class="card"><h2>Cuentas y permisos <button class="btn" data-v="invitar">+ Registrar estudiante</button></h2>${tabla}</div>${pend}`;
 }
 function vSolicitudes() {
   if (!solic.length) return `<div class="card"><h2>Solicitudes de afiliación</h2><div class="empty">No hay solicitudes pendientes.</div></div>`;
@@ -719,13 +718,13 @@ function vInvitar(pre = {}) {
   const rolesOpc = yo.rol === "dueno" ? ["admin", "docente", "alumno"] : yo.rol === "admin" ? ["docente", "alumno"] : ["alumno"];
   const instId = yo.rol === "dueno" ? (pre.inst || (insts[0] && insts[0].id)) : yo.institucion.id;
   const docs = yo.rol === "docente" ? [] : docentesDe(instId);
-  return `<div class="card"><h2>Crear cuenta</h2><p style="margin-top:0;color:var(--mute)">Se genera un usuario y un código. Entrégaselos a la persona: en «Activar cuenta» elegirá su contraseña.</p>
+  return `<div class="card"><h2>${pre.rol && pre.rol !== "alumno" ? "Crear cuenta" : "Registrar estudiante"}</h2><p style="margin-top:0;color:var(--mute)">Se genera un usuario y un código. Entrégaselos a la persona: en «Activar cuenta» elegirá su contraseña.</p>
     <form class="form" id="fInv">
     ${yo.rol === "dueno" ? `<label>Institución<select name="inst" id="invInst">${insts.map(i => `<option value="${i.id}" ${i.id === instId ? "selected" : ""}>${esc(i.nombre)}</option>`).join("")}</select></label>` : ""}
-    <label>Rol<select name="rol" id="invRol">${rolesOpc.map(r => `<option value="${r}" ${pre.rol === r ? "selected" : ""}>${ROL[r]}</option>`).join("")}</select></label>
+    <label>Rol<select name="rol" id="invRol">${rolesOpc.map(r => `<option value="${r}" ${(pre.rol || "alumno") === r ? "selected" : ""}>${ROL[r]}</option>`).join("")}</select></label>
     <div class="row2"><label>Nombres<input name="nombres" required></label><label>Apellidos<input name="apellidos"></label></div>
     ${yo.rol === "docente" ? "" : `<label id="invDocWrap">Docente (para alumnos)<select name="docente">${docs.map(d => `<option value="${d.id}">${esc(nombreCompleto(d))}</option>`).join("") || "<option value=''>(no hay docentes)</option>"}</select></label>`}
-    <div class="err" id="err"></div><div><button class="btn">Crear cuenta</button></div></form></div>`;
+    <div class="err" id="err"></div><div><button class="btn">${pre.rol && pre.rol !== "alumno" ? "Crear cuenta" : "Registrar"}</button></div></form></div>`;
 }
 function conteoInst(i) {
   return { docentes: perfiles.filter(p => p.institucion_id === i.id && p.rol === "docente").length, estudiantes: est.filter(e => e.institucion_id === i.id).length };
@@ -1077,6 +1076,9 @@ const acciones = {
 };
 function actualizarFormInvitar() {
   const f = $("#fInv"); if (!f) return;
+  const alumno = f.rol.value === "alumno", card = f.closest(".card");
+  card.querySelector("h2").textContent = alumno ? "Registrar estudiante" : "Crear cuenta";   // el título sigue al rol elegido
+  f.querySelector("button:not([type=button])").textContent = alumno ? "Registrar" : "Crear cuenta";
   const w = $("#invDocWrap"); if (!w) return;
   w.style.display = f.rol.value === "alumno" ? "" : "none";
   if (yo.rol === "dueno") { const docs = docentesDe(Number(f.inst.value)); f.docente.innerHTML = docs.map(d => `<option value="${d.id}">${esc(nombreCompleto(d))}</option>`).join("") || "<option value=''>(no hay docentes)</option>"; }
