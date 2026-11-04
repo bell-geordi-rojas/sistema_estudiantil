@@ -952,8 +952,8 @@ function vMasivo() {
   const instId = instMasivo(), docs = yo.rol === "docente" ? [] : docentesDe(instId), dom = dominioDe(instId);
   const avisoDom = dom ? `<p class="msg">Correo institucional: <b>usuario@${esc(dom)}</b>, por ejemplo <b>pgomezj@${esc(dom)}</b> para «Juan Carlos Pérez Gómez».</p>`
     : `<p class="msg warn">Esta institución aún no tiene dominio de correo institucional, así que los usuarios se generan sin él (inicial + apellido). Defínelo en ${yo.rol === "dueno" ? "«Instituciones»" : "«Cursos y trimestres»/«Administrar cursos»"}.</p>`;
-  const avisoCorreo = !yo.correo ? `<p class="msg warn">El envío de correos aún no está conectado: las cuentas se crearán igual y podrás descargar un CSV con las credenciales.${yo.rol === "admin" ? " Conéctalo en «Correo institucional»." : ""}</p>`
-    : yo.rol === "admin" && !yo.institucion.correo_propio ? `<p class="msg warn">Los correos saldrán del servicio general del sistema. Conecta la cuenta de Google de tu institución en «Correo institucional» para que salgan desde ella.</p>` : "";
+  const avisoCorreo = !yo.correo ? `<p class="msg warn">El envío de correos aún no está conectado: las cuentas se crearán igual y podrás descargar un CSV con las credenciales.${yo.rol === "admin" ? " Conéctalo en «Correo institucional»." : yo.rol === "dueno" ? " Configura el correo del sistema (ver README, «Conecta el envío de correos»)." : ""}</p>`
+    : yo.rol === "admin" && !yo.institucion.correo_propio ? `<p class="msg">Las credenciales se enviarán desde el correo del sistema. Si tu institución tiene Google Workspace, puedes conectarlo en «Correo institucional» para que salgan desde su cuenta.</p>` : "";
   return `<div class="card"><h2>Registrar varios a la vez</h2>
     <p style="margin-top:0;color:var(--mute)">Pega <b>una persona por línea</b>: nombre completo y correo personal (Gmail), separados por coma, punto y coma o tabulación. El sistema genera el usuario y envía las credenciales a ese correo.</p>${avisoDom}${avisoCorreo}
     <form class="form wide" id="fMas">
@@ -1066,7 +1066,7 @@ function vCarpetas() {
 function vCorreo() {
   const inst = yo.institucion, propio = !!inst.correo_propio, general = yo.correo && !propio;
   const estado = propio ? `<span class="pill ok" style="white-space:normal">Conectado a la cuenta de Google de tu institución</span>`
-    : general ? `<span class="pill na" style="white-space:normal">Usando el servicio general del sistema</span>` : `<span class="pill no">Sin conectar</span>`;
+    : general ? `<span class="pill na" style="white-space:normal">Enviando desde el correo del sistema</span>` : `<span class="pill no">Sin conectar</span>`;
   const domCard = `<div class="card"><h2>Correo institucional</h2><p style="margin-top:0;color:var(--mute)">Dominio de los correos de tu institución (por ejemplo <code>midominio.edu</code>). Con él, el usuario de cada cuenta nueva se genera como <b>pgomezj@midominio.edu</b> (inicial del 1.er apellido + 2.º apellido + inicial del nombre).</p>
     <form class="bar" id="fDominio"><input name="dominio" value="${esc(inst.dominio || "")}" placeholder="midominio.edu" autocapitalize="none" style="flex:1;min-width:220px"><button class="btn">Guardar dominio</button></form><div class="err"></div></div>`;
   const pasos = ["Pulsa <b>Copiar código</b> (abajo).",
@@ -1075,7 +1075,7 @@ function vCorreo() {
     "<i>Implementar → Nueva implementación → Aplicación web</i>; <i>Ejecutar como: Yo</i>; <i>Acceso: Cualquier persona</i>. Autoriza el permiso de correo (si Google avisa «app no verificada»: <i>Avanzado → Ir a… → Permitir</i>).",
     "Copia la URL que termina en <code>/exec</code>, pégala aquí y pulsa <b>Guardar conexión</b>. Luego envía el correo de prueba."];
   const gmail = `<div class="card"><h2>Envío de credenciales por Gmail ${estado}</h2>
-    <p style="margin-top:0;color:var(--mute)">Los correos con usuario y código salen <b>desde tu propia cuenta de Google</b> (no desde la del dueño del sistema). Se configura una sola vez.${general ? " Mientras no lo conectes, se usa el servicio general del sistema." : ""}</p>
+    <p style="margin-top:0;color:var(--mute)">Por defecto, los correos con usuario y código salen <b>del correo del sistema</b> y no necesitas hacer nada. Si tu institución tiene <b>Google Workspace</b> (o quieres usar tu propio Gmail), conéctalo aquí una sola vez y saldrán <b>desde tu cuenta</b>.</p>
     <ol style="color:var(--mute);line-height:1.7;padding-left:20px;margin:0 0 12px">${pasos.map(p => `<li>${p}</li>`).join("")}</ol>
     <div class="bar"><button class="btn sec" data-a="correo-copiar-script">📋 Copiar código</button></div>
     <form class="form" id="fCorreo" style="max-width:none"><label>Clave secreta (la misma que en <code>SECRETO</code>)<div class="add"><input name="secreto" id="correoSecreto" autocomplete="off" minlength="12" required placeholder="mínimo 12 caracteres"><button type="button" class="btn sec" data-a="correo-generar">Generar</button><button type="button" class="btn sec" data-a="correo-copiar-clave">Copiar</button></div></label>
