@@ -142,6 +142,19 @@ create table if not exists inscripciones (
   primary key (estudiante_id, curso_id)
 );
 create index if not exists inscripciones_curso on inscripciones (curso_id);
+-- Periodos (trimestres o ciclos) ABIERTOS para los alumnos: el primero siempre lo esta; los demas los activa el docente, en orden.
+--   secundaria y universidad: por curso (curso_id);  primaria: por aula (docente_id, el tutor).
+create table if not exists periodos_activos (
+  id bigint generated always as identity primary key,
+  institucion_id bigint not null references instituciones (id) on delete cascade,
+  periodo_id bigint not null references periodos (id) on delete cascade,
+  curso_id bigint references cursos (id) on delete cascade,
+  docente_id uuid references perfiles (id) on delete cascade,
+  check ((curso_id is null) <> (docente_id is null))
+);
+create unique index if not exists periodos_activos_curso on periodos_activos (periodo_id, curso_id) where curso_id is not null;
+create unique index if not exists periodos_activos_docente on periodos_activos (periodo_id, docente_id) where docente_id is not null;
+alter table periodos_activos enable row level security;
 alter table carreras enable row level security;
 alter table docente_cursos enable row level security;
 alter table inscripciones enable row level security;
@@ -443,6 +456,13 @@ create or replace function _docente_de_mis_cursos(p_perfil uuid) returns boolean
 create or replace function _docente_comparte_curso(p_perfil uuid) returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from docente_cursos a join docente_cursos b on a.curso_id = b.curso_id where a.docente_id = p_perfil and b.docente_id = auth.uid()) $$;
 
+-- El periodo esta abierto para los alumnos: es el primero de la institucion o el docente lo activo (en ese curso, o en su aula en primaria)
+create or replace function _periodo_visible(p_inst bigint, p_curso bigint, p_docente uuid, p_periodo bigint) returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from periodos p where p.id = p_periodo and p.institucion_id = p_inst
+                 and p.orden = (select min(orden) from periodos where institucion_id = p_inst))
+      or exists (select 1 from periodos_activos a where a.periodo_id = p_periodo
+                 and ((_por_curso(p_inst) and a.curso_id = p_curso) or (not _por_curso(p_inst) and a.docente_id = p_docente))) $$;
+
 -- El usuario actual puede modificar los datos de ese estudiante (admin de su institucion; en primaria tambien su docente a cargo)
 create or replace function _puedo_gestionar(p_est bigint) returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from estudiantes e where e.id = p_est and (
@@ -512,7 +532,8 @@ drop policy if exists notas_sel on notas;
 create policy notas_sel on notas for select to authenticated using (
   exists (select 1 from estudiantes e where e.id = notas.estudiante_id
           and (mi_rol() <> 'alumno' or e.perfil_id = auth.uid() or permiso('ver_notas_companeros'))
-          and (mi_rol() <> 'docente' or not _por_curso(e.institucion_id) or _ensena(notas.curso_id))));   -- en secundaria/universidad el docente solo ve las notas de sus cursos
+          and (mi_rol() <> 'docente' or not _por_curso(e.institucion_id) or _ensena(notas.curso_id))
+          and (mi_rol() <> 'alumno' or _periodo_visible(e.institucion_id, notas.curso_id, e.docente_id, notas.periodo_id))));   -- en secundaria/universidad el docente solo ve las notas de sus cursos
 
 drop policy if exists nd_sel on notas_detalle;
 create policy nd_sel on notas_detalle for select to authenticated using (
@@ -544,6 +565,13 @@ create policy insc_sel on inscripciones for select to authenticated using (
   or (mi_rol() = 'admin' and exists (select 1 from cursos c where c.id = inscripciones.curso_id and c.institucion_id = mi_inst()))
   or (mi_rol() = 'docente' and _ensena(curso_id))
   or (mi_rol() = 'alumno' and (estudiante_id = _mi_estudiante() or _inscrito(_mi_estudiante(), curso_id))));
+
+drop policy if exists pa_sel on periodos_activos;
+create policy pa_sel on periodos_activos for select to authenticated using (
+  mi_rol() = 'dueno'
+  or (mi_rol() = 'admin' and institucion_id = mi_inst())
+  or (mi_rol() = 'docente' and (docente_id = auth.uid() or (curso_id is not null and _ensena(curso_id))))
+  or (mi_rol() = 'alumno' and ((docente_id is not null and docente_id = mi_docente()) or (curso_id is not null and _inscrito(_mi_estudiante(), curso_id)))));
 
 drop policy if exists periodos_sel on periodos;
 create policy periodos_sel on periodos for select to authenticated using (mi_rol() = 'dueno' or institucion_id = mi_inst());
@@ -1224,6 +1252,9 @@ language plpgsql security definer set search_path = public as $$
 declare v_id bigint;
 begin
   if not permiso('editar_notas') or not _puedo_calificar(p_estudiante, p_curso) then raise exception 'No autorizado: el alumno debe estar inscrito en el curso y el curso debe ser tuyo.'; end if;
+  if mi_rol() = 'docente' and not _periodo_visible((select institucion_id from estudiantes where id = p_estudiante), p_curso, auth.uid(), p_periodo) then
+    raise exception 'Primero activa este periodo para tus alumnos (en la ventana del curso).';
+  end if;
   insert into notas (estudiante_id, curso_id, periodo_id, nota, peso, titulo)
     values (p_estudiante, p_curso, p_periodo, p_nota, coalesce(p_peso, 1), nullif(left(trim(coalesce(p_titulo, '')), 60), ''))
     returning id into v_id;
@@ -1369,6 +1400,41 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
+-- Periodos abiertos: el docente (o el administrador, en secundaria/universidad) activa el siguiente trimestre o ciclo
+-- ---------------------------------------------------------------------------
+-- Se activan en orden (no se puede abrir el 3.o sin el 2.o) y solo se puede cerrar el ultimo abierto. El primero siempre esta abierto.
+create or replace function activar_periodo(p_periodo bigint, p_curso bigint default null, p_activo boolean default true) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_inst bigint := mi_inst(); v_ord int; v_min int; v_max int; v_sig int; v_por boolean; v_doc uuid;
+begin
+  if mi_rol() not in ('admin', 'docente') then raise exception 'No autorizado.'; end if;
+  select orden into v_ord from periodos where id = p_periodo and institucion_id = v_inst;
+  if not found then raise exception 'Periodo invalido.'; end if;
+  select min(orden) into v_min from periodos where institucion_id = v_inst;
+  if v_ord = v_min then raise exception 'El primer periodo siempre esta activo.'; end if;
+  v_por := _por_curso(v_inst);
+  if v_por then
+    if p_curso is null or not exists (select 1 from cursos where id = p_curso and institucion_id = v_inst) then raise exception 'Curso invalido.'; end if;
+    if mi_rol() = 'docente' and not _ensena(p_curso) then raise exception 'No autorizado: ese curso no es tuyo.'; end if;
+    v_doc := null;
+  else
+    if mi_rol() <> 'docente' then raise exception 'En primaria cada docente activa los periodos de su aula.'; end if;
+    p_curso := null; v_doc := auth.uid();
+  end if;
+  select coalesce(max(p.orden), v_min) into v_max
+    from periodos_activos a join periodos p on p.id = a.periodo_id
+    where (v_por and a.curso_id = p_curso) or (not v_por and a.docente_id = v_doc);
+  if p_activo then
+    select min(orden) into v_sig from periodos where institucion_id = v_inst and orden > v_max;
+    if v_ord > v_max and v_ord > coalesce(v_sig, v_ord) then raise exception 'Activa primero el periodo anterior.'; end if;
+    insert into periodos_activos (institucion_id, periodo_id, curso_id, docente_id) values (v_inst, p_periodo, p_curso, v_doc) on conflict do nothing;
+  else
+    if v_ord < v_max then raise exception 'Solo puedes cerrar el ultimo periodo activo.'; end if;
+    delete from periodos_activos where periodo_id = p_periodo and ((v_por and curso_id = p_curso) or (not v_por and docente_id = v_doc));
+  end if;
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- 10. Primera cuenta: el dueno (se ejecuta una vez, a mano, con TU usuario y TU codigo secreto)
 -- ---------------------------------------------------------------------------
 -- Cada administrador conecta la cuenta de Google de su institucion (desde la pantalla «Correo»); el dueno puede indicar p_inst
@@ -1459,6 +1525,27 @@ do $$ declare r record; begin
   end if;
 end $$;
 
+-- Notas que ya existian: se abren los periodos hasta el ultimo que ya tenia notas (una sola vez; el marcador evita rehacerlo)
+do $$ begin
+  if not exists (select 1 from config where clave = 'periodos_activos_v1') then
+    insert into periodos_activos (institucion_id, periodo_id, curso_id)
+      select c.institucion_id, p.id, c.id from cursos c
+      join lateral (select max(pp.orden) as m from notas n join periodos pp on pp.id = n.periodo_id where n.curso_id = c.id) x on x.m is not null
+      join periodos p on p.institucion_id = c.institucion_id and p.orden <= x.m
+      where _por_curso(c.institucion_id)
+      on conflict do nothing;
+    insert into periodos_activos (institucion_id, periodo_id, docente_id)
+      select e.institucion_id, p.id, e.docente_id
+      from (select s.institucion_id, s.docente_id, max(pp.orden) as m from estudiantes s
+            join notas n on n.estudiante_id = s.id join periodos pp on pp.id = n.periodo_id
+            where s.docente_id is not null group by s.institucion_id, s.docente_id) e
+      join periodos p on p.institucion_id = e.institucion_id and p.orden <= e.m
+      where not _por_curso(e.institucion_id)
+      on conflict do nothing;
+    insert into config (clave, valor) values ('periodos_activos_v1', '1');
+  end if;
+end $$;
+
 -- 11. Permisos de ejecucion: solo lo necesario queda abierto
 -- ---------------------------------------------------------------------------
 do $$
@@ -1472,7 +1559,7 @@ begin
              'cambiar_rol', 'eliminar_cuenta', 'regenerar_codigo', 'eliminar_invitacion', 'registrar_estudiante', 'actualizar_estudiante', 'reasignar_docente',
              'eliminar_estudiante', 'agregar_nota', 'actualizar_nota', 'eliminar_nota',
              'cambiar_tipo_institucion', 'eliminar_institucion', 'crear_invitaciones_masivo', 'actualizar_dominio', 'configurar_correo_institucion', 'quitar_correo_institucion', 'probar_correo', 'actualizar_cuentas_google',
-             'crear_carrera', 'editar_carrera', 'eliminar_carrera', 'asignar_curso_docente', 'inscribir_estudiantes', 'inscribir_ciclo', 'cambiar_carrera_estudiante', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
+             'activar_periodo', 'crear_carrera', 'editar_carrera', 'eliminar_carrera', 'asignar_curso_docente', 'inscribir_estudiantes', 'inscribir_ciclo', 'cambiar_carrera_estudiante', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
              'crear_periodo', 'renombrar_periodo', 'eliminar_periodo', 'actualizar_mi_perfil', 'actualizar_mi_foto'])
   loop
     execute format('revoke all on function %s from public, anon', f);

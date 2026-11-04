@@ -1,5 +1,5 @@
 /**
- * Envío de credenciales por Gmail (y creación opcional de cuentas de Google Workspace) para el sistema Estudiantil.
+ * Envío de credenciales por Gmail (y creación opcional de cuentas de Google Workspace) para el sistema SINEVA.
  *
  * La base de datos (Supabase) llama a esta aplicación web cada vez que se registra a alguien. El correo sale desde la
  * cuenta de Google que publica este script (la del director o la institucional).
@@ -48,7 +48,7 @@ function doPost(e) {
 
     const html =
       '<div style="font-family:Segoe UI,Arial,sans-serif;max-width:520px;margin:auto;color:#1f2937">' +
-      '<h2 style="color:#0e9aa7;margin-bottom:4px">Estudiantil</h2>' +
+      '<h2 style="color:#0e9aa7;margin-bottom:4px">SINEVA</h2>' +
       '<p>Hola <b>' + limpiar(d.nombre) + '</b>,</p>' +
       '<p>' + inst + ' creó tu cuenta de <b>' + rol + '</b>. Estas son tus credenciales de acceso:</p>' +
       '<table style="border-collapse:collapse;margin:12px 0">' + filas + '</table>' + aviso +
@@ -61,7 +61,7 @@ function doPost(e) {
       "\nCódigo de activación: " + d.codigo + textoGoogle + "\n\nEntra en 'Activar cuenta' " + (app ? "en " + app + " " : "") +
       "con tu usuario (" + d.usuario + ") y el código, y elige tu contraseña. El código es de un solo uso.";
 
-    MailApp.sendEmail({ to: d.para, subject: "Tus credenciales de acceso - " + inst, body: texto, htmlBody: html, name: "Estudiantil" });
+    MailApp.sendEmail({ to: d.para, subject: "Tus credenciales de acceso - " + inst, body: texto, htmlBody: html, name: "SINEVA" });
     return respuesta("ok");
   } catch (err) {
     return respuesta("error: " + err);
@@ -101,11 +101,11 @@ function crearCuentaGoogle(d) {
 }
 
 function avisarAlDirector(asunto, detalle) {
-  try { MailApp.sendEmail(Session.getEffectiveUser().getEmail(), "[Estudiantil] " + asunto, detalle); } catch (e) {}
+  try { MailApp.sendEmail(Session.getEffectiveUser().getEmail(), "[SINEVA] " + asunto, detalle); } catch (e) {}
 }
 
 // Respuesta de prueba al abrir la URL en el navegador
-function doGet() { return respuesta("Estudiantil: servicio de correo activo"); }
+function doGet() { return respuesta("SINEVA: servicio de correo activo"); }
 
 function respuesta(texto) { return ContentService.createTextOutput(texto); }
 function fila(k, v) { return '<tr><td style="padding:6px 14px 6px 0;color:#6b7280">' + k + '</td><td style="padding:6px 0">' + v + '</td></tr>'; }

@@ -42,7 +42,7 @@ async function crear() {
   try { const s = require("electron").session.defaultSession; s.preconnect({ url: ORIGEN, numSockets: 2 }); s.preconnect({ url: "https://tikpnokwqkofitguvpdx.supabase.co", numSockets: 4 }); } catch {}
   win = new BrowserWindow({
     width: 1280, height: 800, minWidth: 900, minHeight: 600,
-    title: "Estudiantil", icon: path.join(__dirname, "icon.png"), backgroundColor: "#0f1420", autoHideMenuBar: true,
+    title: "SINEVA", icon: path.join(__dirname, "icon.png"), backgroundColor: "#0f1420", autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false },
   });
   // La web reconoce esta marca (y la versión instalada) para no ofrecer la descarga dentro del programa

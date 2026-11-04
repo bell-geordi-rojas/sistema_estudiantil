@@ -6,6 +6,6 @@ estudiantes.txt
 app/**/node_modules/
 app/electron/dist/
 app/android/android/
-app/android/Estudiantil.apk
+app/android/SINEVA.apk
 
 *.pfx

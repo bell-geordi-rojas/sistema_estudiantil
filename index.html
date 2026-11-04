@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sistema Estudiantil</title>
+<title>SINEVA</title>
 <link rel="preconnect" href="https://tikpnokwqkofitguvpdx.supabase.co" crossorigin>
 <link rel="icon" href="logo.png" type="image/png">
 <link rel="apple-touch-icon" href="logo.png">
@@ -227,7 +227,7 @@ const EMAIL_DOMINIO = "acceso.estudiantil.app"; // correo interno de las cuentas
 const NOTA_MIN = 0, NOTA_MAX = 20, NOTA_APROBACION = 11, MAX_NOTAS = 20;
 // Codigo del Apps Script que cada institucion publica en su cuenta de Google (igual que google/correo.gs)
 const SCRIPT_CORREO = String.raw`/**
- * Envío de credenciales por Gmail (y creación opcional de cuentas de Google Workspace) para el sistema Estudiantil.
+ * Envío de credenciales por Gmail (y creación opcional de cuentas de Google Workspace) para el sistema SINEVA.
  *
  * La base de datos (Supabase) llama a esta aplicación web cada vez que se registra a alguien. El correo sale desde la
  * cuenta de Google que publica este script (la del director o la institucional).
@@ -276,7 +276,7 @@ function doPost(e) {
 
     const html =
       '<div style="font-family:Segoe UI,Arial,sans-serif;max-width:520px;margin:auto;color:#1f2937">' +
-      '<h2 style="color:#0e9aa7;margin-bottom:4px">Estudiantil</h2>' +
+      '<h2 style="color:#0e9aa7;margin-bottom:4px">SINEVA</h2>' +
       '<p>Hola <b>' + limpiar(d.nombre) + '</b>,</p>' +
       '<p>' + inst + ' creó tu cuenta de <b>' + rol + '</b>. Estas son tus credenciales de acceso:</p>' +
       '<table style="border-collapse:collapse;margin:12px 0">' + filas + '</table>' + aviso +
@@ -289,7 +289,7 @@ function doPost(e) {
       "\nCódigo de activación: " + d.codigo + textoGoogle + "\n\nEntra en 'Activar cuenta' " + (app ? "en " + app + " " : "") +
       "con tu usuario (" + d.usuario + ") y el código, y elige tu contraseña. El código es de un solo uso.";
 
-    MailApp.sendEmail({ to: d.para, subject: "Tus credenciales de acceso - " + inst, body: texto, htmlBody: html, name: "Estudiantil" });
+    MailApp.sendEmail({ to: d.para, subject: "Tus credenciales de acceso - " + inst, body: texto, htmlBody: html, name: "SINEVA" });
     return respuesta("ok");
   } catch (err) {
     return respuesta("error: " + err);
@@ -329,11 +329,11 @@ function crearCuentaGoogle(d) {
 }
 
 function avisarAlDirector(asunto, detalle) {
-  try { MailApp.sendEmail(Session.getEffectiveUser().getEmail(), "[Estudiantil] " + asunto, detalle); } catch (e) {}
+  try { MailApp.sendEmail(Session.getEffectiveUser().getEmail(), "[SINEVA] " + asunto, detalle); } catch (e) {}
 }
 
 // Respuesta de prueba al abrir la URL en el navegador
-function doGet() { return respuesta("Estudiantil: servicio de correo activo"); }
+function doGet() { return respuesta("SINEVA: servicio de correo activo"); }
 
 function respuesta(texto) { return ContentService.createTextOutput(texto); }
 function fila(k, v) { return '<tr><td style="padding:6px 14px 6px 0;color:#6b7280">' + k + '</td><td style="padding:6px 0">' + v + '</td></tr>'; }
@@ -341,8 +341,8 @@ function fila(k, v) { return '<tr><td style="padding:6px 14px 6px 0;color:#6b728
 function limpiar(t) { return String(t == null ? "" : t).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }`;
 // Programas para descargar (los publica el workflow «Compilar programas» en la versión app-latest de GitHub)
 const DESCARGAS = {
-  android: "https://github.com/bell786u-ctrl/sistema_estudiantil/releases/download/app-latest/Estudiantil.apk",
-  pc: "https://github.com/bell786u-ctrl/sistema_estudiantil/releases/download/app-latest/Estudiantil-Setup.exe",
+  android: "https://github.com/bell786u-ctrl/sistema_estudiantil/releases/download/app-latest/SINEVA.apk",
+  pc: "https://github.com/bell786u-ctrl/sistema_estudiantil/releases/download/app-latest/SINEVA-Setup.exe",
 };
 const EN_APP = /EstudiantilApp/.test(navigator.userAgent);   // dentro del programa de PC o de Android no se ofrece la descarga
 const VERSION_APP = (navigator.userAgent.match(/EstudiantilApp\/([\d.]+)/) || [])[1] || (EN_APP ? "0.0.0" : "");   // versión del programa instalado
@@ -377,7 +377,7 @@ async function instalarAndroid() {
     est("Pulsa «Actualizar» en la ventana de Android. Si no apareció, usa el botón de abajo.");
   } catch (e) {
     const m = (e && e.message) || "";
-    est(m === "permiso" ? "Activa «Permitir desde esta fuente» para Estudiantil y vuelve aquí: la actualización seguirá sola." : "No se pudo descargar la actualización" + (m ? " (" + m + ")" : "") + ". Pulsa el botón para reintentar.");
+    est(m === "permiso" ? "Activa «Permitir desde esta fuente» para SINEVA y vuelve aquí: la actualización seguirá sola." : "No se pudo descargar la actualización" + (m ? " (" + m + ")" : "") + ". Pulsa el botón para reintentar.");
   } finally { instalando = false; }
 }
 const PESOS = [1, 2, 3, 4];   // ponderación de una nota (solo universidades); si no se elige vale 1
@@ -523,7 +523,7 @@ class Estudiante {
 
 /* ===== Estado ===== */
 let yo = null, permisos = {};
-let est = [], perfiles = [], insts = [], solic = [], invs = [], cursos = [], periodos = [], carreras = [], docCursos = [], inscr = [];
+let est = [], perfiles = [], insts = [], solic = [], invs = [], cursos = [], periodos = [], carreras = [], docCursos = [], inscr = [], activos = [];
 let inscrSet = new Set();   // "estudiante-curso" de cada inscripción, para consultarlas al instante
 let vista = "panel", orden = 0, filtro = "", detalleId = null, borrador = [], kBorr = 0, periodoSel = null;
 let tabLogin = "ingresar", instSel = null, avisoCarga = "", estadoSis = null;
@@ -533,12 +533,23 @@ const periodosDe = id => periodos.filter(p => p.institucion_id === id);
 const cursoDe = id => cursos.find(c => c.id === id);
 const periodoDe = id => periodos.find(p => p.id === id);
 const miCursos = () => yo && yo.institucion ? cursosDe(yo.institucion.id) : [];
+// Periodo abierto para los alumnos: el primero siempre; los demás los activa el docente (por curso, o por aula en primaria)
+const primerPeriodo = inst => Math.min(...periodosDe(inst).map(p => p.orden));
+const periodoAbierto = (p, c) => {
+  if (p.orden === primerPeriodo(p.institucion_id)) return true;
+  if (porCursoInst(p.institucion_id)) return activos.some(a => a.periodo_id === p.id && a.curso_id === c.id);
+  const doc = yo.rol === "alumno" ? yo.docente_id : yo.id;
+  return activos.some(a => a.periodo_id === p.id && a.docente_id === doc);
+};
+const puedeActivar = c => !!yo && (yo.rol === "docente" || (yo.rol === "admin" && porCursoInst(c.institucion_id)));
 const misPeriodos = () => {
   if (!yo || !yo.institucion) return [];
   const ps = periodosDe(yo.institucion.id);
   if (yo.rol !== "alumno") return ps;
   const e = est.find(x => x.perfil_id === yo.id), car = e && carreraDe(e.carrera_id);
-  return car ? ps.filter(p => p.orden <= car.ciclos) : ps;   // el alumno solo ve los ciclos de su carrera
+  const dentro = car ? ps.filter(p => p.orden <= car.ciclos) : ps;   // el alumno solo ve los ciclos de su carrera
+  const ini = primerPeriodo(yo.institucion.id);
+  return dentro.filter(p => p.orden === ini || activos.some(a => a.periodo_id === p.id));   // y solo los que el docente ya activó
 };
 const nomPeriodos = tipo => tipo === "universidad" ? "ciclos" : "trimestres";   // nombre del periodo según el tipo de institución
 const nomPeriodo = tipo => tipo === "universidad" ? "Ciclo" : "Trimestre";
@@ -577,6 +588,7 @@ const consultasComunes = () => Promise.all([
   sel("carreras?select=id,institucion_id,nombre,ciclos,orden&order=orden,id"),
   selTodo("inscripciones?select=estudiante_id,curso_id&order=estudiante_id,curso_id"),
   sel("docente_cursos?select=docente_id,curso_id"),
+  sel("periodos_activos?select=periodo_id,curso_id,docente_id").catch(() => []),
 ]);
 // Consultas que dependen del rol; al entrar se lanzan todas por adelantado (la base solo entrega lo que la cuenta puede ver)
 // y luego se descarta lo que no corresponde al rol, así no hay que esperar a conocer el rol para pedirlas.
@@ -588,13 +600,13 @@ const consultasRol = () => Promise.all([
 async function cargarDatos(adelantadas) {
   const gest = puedeGestionar(), verInst = yo.rol === "dueno" || yo.rol === "admin";
   const sin = [], nada = Promise.resolve([]);
-  const [[e, p, cu, pe, ca, ins, dc], [i, s, v]] = await Promise.all(adelantadas || [
+  const [[e, p, cu, pe, ca, ins, dc, pa], [i, s, v]] = await Promise.all(adelantadas || [
     consultasComunes(),
     Promise.all([verInst ? sel("instituciones?select=*&order=nombre") : nada, gest ? sel("solicitudes?select=*&estado=eq.pendiente&order=creado") : nada,
       gest ? sel("invitaciones?select=id,rol,nombres,apellidos,usuario,institucion_id,docente_id,correo,creado&usado=eq.false&order=creado.desc") : nada]),
   ]);
   const i2 = verInst ? i : sin, s2 = gest ? s : sin, v2 = gest ? v : sin;
-  cursos = cu; periodos = pe; carreras = ca; inscr = ins; docCursos = dc; inscrSet = new Set(ins.map(x => x.estudiante_id + "-" + x.curso_id));
+  cursos = cu; periodos = pe; carreras = ca; inscr = ins; docCursos = dc; activos = pa || []; inscrSet = new Set(ins.map(x => x.estudiante_id + "-" + x.curso_id));
   if (periodoSel && !periodos.some(x => x.id === periodoSel)) periodoSel = null;
   est = e.map(d => new Estudiante(d)); perfiles = p; insts = i2; solic = s2; invs = v2;
 }
@@ -819,9 +831,9 @@ function descargasHTML() {
     <ol style="color:var(--mute);margin:12px 0 0;padding-left:20px;line-height:1.6;font-size:13px">${pasos.map(p => `<li>${p}</li>`).join("")}</ol></div>`;
   return `<p style="margin:0 0 12px;color:var(--mute)">El programa funciona igual que la web (mismas cuentas, mismos datos) y necesita internet.</p>` +
     caja("android", "📱", "Android", "Instalador .apk para teléfonos y tablets.", "⬇ Descargar para Android", [
-      "Abre el archivo <b>Estudiantil.apk</b> descargado.", "Si el teléfono lo pide, permite «instalar apps desconocidas» para tu navegador o gestor de archivos.", "Pulsa Instalar y abre <b>Estudiantil</b>."]) +
+      "Abre el archivo <b>SINEVA.apk</b> descargado.", "Si el teléfono lo pide, permite «instalar apps desconocidas» para tu navegador o gestor de archivos.", "Pulsa Instalar y abre <b>SINEVA</b>."]) +
     caja("pc", "🖥", "PC con Windows", "Instalador (setup) para Windows 10 y 11.", "⬇ Descargar para PC", [
-      "Ejecuta <b>Estudiantil-Setup.exe</b>.", "Si Windows muestra «protegió su PC», pulsa <b>Más información</b> y luego <b>Ejecutar de todas formas</b> (el programa aún no tiene firma digital).", "Elige la carpeta, instala y abre <b>Estudiantil</b> desde el escritorio."]);
+      "Ejecuta <b>SINEVA-Setup.exe</b>.", "Si Windows muestra «protegió su PC», pulsa <b>Más información</b> y luego <b>Ejecutar de todas formas</b> (el programa aún no tiene firma digital).", "Elige la carpeta, instala y abre <b>SINEVA</b> desde el escritorio."]);
 }
 function vDescargar() { return `<div class="card" style="max-width:680px"><h2>Descargar el sistema</h2>${descargasHTML()}</div>`; }
 /* ===== Cursos en tarjetas (con banner de patrón) ===== */
@@ -1286,7 +1298,7 @@ async function subirFoto(archivo) {
 /* ===== Pantallas ===== */
 function cabecera(conUsuario, menu = "") {
   const sub = yo && yo.institucion ? yo.institucion.nombre : "Propietario";
-  return `<header><div class="logo"><i></i>ESTUDIANTIL</div><div class="sp"></div>
+  return `<header><div class="logo"><i></i>SINEVA</div><div class="sp"></div>
     <button class="hbtn" data-a="tema" title="Cambiar entre modo claro y oscuro">${temaActual() === "dark" ? "☀<span class=\"txt\"> Modo claro</span>" : "☾<span class=\"txt\"> Modo oscuro</span>"}</button>${menu ? `<div class="menuwrap"><button class="hbtn menubtn" data-a="menu" aria-label="Menú" title="Menú">⋮</button><div class="menupop" id="menuPop">${menu}</div></div>` : ""}
     ${conUsuario ? `<div class="user">${avatarDe(nombreCompleto(yo), yo.usuario, yo.id)}<div>${esc(nombreCompleto(yo))}<small>${ROL[yo.rol]} · ${esc(sub)}</small></div></div><button class="hbtn" data-a="salir">Salir</button>` : ""}</header>`;
 }
@@ -1305,13 +1317,13 @@ function pantallaLogin() {
     <div class="row2"><label>Nombres<input name="nombres" required></label><label>Apellidos<input name="apellidos" required></label></div>
     <label>Soy<select name="rol"><option value="alumno">Alumno</option><option value="docente">Docente</option></select></label>
     <div class="err" id="err"></div><button class="btn">Enviar solicitud</button></form>`;
-  return `${cabecera(false)}<div class="login"><div class="card"><div class="logo" style="color:var(--teal);margin-bottom:4px"><img src="logo.png" alt="" width="44" height="44" style="border-radius:8px">ESTUDIANTIL</div>
+  return `${cabecera(false)}<div class="login"><div class="card"><div class="logo" style="color:var(--teal);margin-bottom:4px"><img src="logo.png" alt="" width="44" height="44" style="border-radius:8px">SINEVA</div>
     <p style="margin:0 0 14px;color:var(--mute)">Sistema de gestión de estudiantes</p>
     ${estadoSis && estadoSis.mantenimiento ? `<p class="msg warn">🔧 ${esc(estadoSis.mensaje || "El sistema está en mantenimiento.")}</p>` : ""}<div class="tabs">${t("ingresar", "Ingresar")}${t("activar", "Activar cuenta")}${t("afiliar", "Afiliarme")}${EN_APP ? "" : t("descargar", "⬇ Descargar")}</div>${cuerpo}</div></div>`;
 }
 function pantallaActualizar() {
   const a = actualizacion, pc = OS_APP === "pc";
-  return `${cabecera(false)}<div class="login"><div class="card"><div class="logo" style="color:var(--teal);margin-bottom:8px"><img src="logo.png" alt="" width="44" height="44" style="border-radius:8px">ESTUDIANTIL</div>
+  return `${cabecera(false)}<div class="login"><div class="card"><div class="logo" style="color:var(--teal);margin-bottom:8px"><img src="logo.png" alt="" width="44" height="44" style="border-radius:8px">SINEVA</div>
     <h2 style="margin:0 0 8px">Actualización obligatoria</h2>
     <p style="margin:0 0 14px;color:var(--mute)">Hay una versión nueva del programa (<b>${esc(a.requerida)}</b>; tienes la ${esc(VERSION_APP === "0.0.0" ? "anterior" : VERSION_APP)}). Para seguir usando el sistema debes actualizarlo.</p>
     ${instaladorNativo()
@@ -1319,8 +1331,8 @@ function pantallaActualizar() {
       : `<a class="btn" href="${esc(a[OS_APP] || DESCARGAS[OS_APP])}" style="display:inline-block;text-decoration:none">⬇ Descargar la actualización</a>
     <ol style="color:var(--mute);margin:14px 0 0;padding-left:20px;line-height:1.6;font-size:13px">${(pc && cmpVer(VERSION_APP, "1.2.0") >= 0
       ? ["El programa se actualiza solo al abrirlo, pero esta vez no pudo (¿sin internet?).", "Ciérralo y ábrelo de nuevo con conexión, o instala el archivo descargado."]
-      : pc ? ["Descarga <b>Estudiantil-Setup.exe</b> y cierra este programa antes de instalar.", "Ejecuta el instalador: reemplaza la versión anterior y conserva tus datos.", "Solo esta vez: desde esta versión el programa se actualiza solo."]
-      : ["Descarga el archivo <b>Estudiantil.apk</b>.", "Ábrelo e instálalo. Si Android da error, desinstala la app primero (tus datos están en el servidor y no se pierden). Solo esta vez: desde esta versión se actualiza sola."]).map(p => `<li>${p}</li>`).join("")}</ol>`}
+      : pc ? ["Descarga <b>SINEVA-Setup.exe</b> y cierra este programa antes de instalar.", "Ejecuta el instalador: reemplaza la versión anterior y conserva tus datos.", "Solo esta vez: desde esta versión el programa se actualiza solo."]
+      : ["Descarga el archivo <b>SINEVA.apk</b>.", "Ábrelo e instálalo. Si Android da error, desinstala la app primero (tus datos están en el servidor y no se pierden). Solo esta vez: desde esta versión se actualiza sola."]).map(p => `<li>${p}</li>`).join("")}</ol>`}
     <button class="btn sec" data-a="recomprobar-version" style="margin-top:14px">Ya actualicé: comprobar de nuevo</button></div></div>`;
 }
 function pantallaBloqueo() {
@@ -1474,7 +1486,11 @@ function cursoSecciones(c) {
       }
       const resumen = alumno ? (ns.length ? `${ns.length} nota(s) · prom. <b>${fmt(mediaPond(ns))}</b>` : "Sin notas")
         : (() => { const con = lista.filter(e => e.deCurso(c.id, p.id).length); return con.length ? `${con.length} estudiante(s) · prom. <b>${fmt(media(con.map(e => e.promedioCurso(c.id, p.id))))}</b>` : "Sin notas"; })();
-      return `<details class="acc ${ns.length ? "" : "vacio"}" ${p.id === abierto ? "open" : ""}><summary><span>${esc(p.nombre)}</span><small>${resumen}</small></summary><div class="cuerpo">${cuerpo}</div></details>`;
+      const abre = periodoAbierto(p, c), ini = p.orden === primerPeriodo(p.institucion_id);
+      if (alumno && !abre) return `<div class="acc vacio" style="padding:12px 14px;display:flex;justify-content:space-between;opacity:.7"><span>🔒 ${esc(p.nombre)}</span><small>Aún no disponible: lo activa tu docente</small></div>`;
+      const boton = !alumno && puedeActivar(c) && !ini ? `<button class="btn sm ${abre ? "sec" : ""}" data-a="activar-per" data-p="${p.id}" data-c="${c.id}" data-on="${abre ? 0 : 1}" style="margin-bottom:10px">${abre ? "Cerrar este periodo para los alumnos" : "Activar para los alumnos"}</button>` : "";
+      const estado = !alumno && !ini ? `<small>${abre ? "Activo para alumnos" : "🔒 Oculto para alumnos"}</small> · ` : "";
+      return `<details class="acc ${ns.length ? "" : "vacio"}" ${p.id === abierto ? "open" : ""}><summary><span>${esc(p.nombre)}</span><small>${estado}${resumen}</small></summary><div class="cuerpo">${boton}${cuerpo}</div></details>`;
     }).join("");
   return secciones;
 }
@@ -1504,6 +1520,16 @@ const acciones = {
   menu() { $("#menuPop").classList.toggle("open"); },
   "curso-menu"(d) { const m = $(`#cm${d.id}`); const abrir = !m.classList.contains("open"); document.querySelectorAll(".cmenu.open").forEach(x => x.classList.remove("open")); if (abrir) m.classList.add("open"); },
   "curso-fav"(d) { const id = idNum(d), f = new Set(favoritos()); f.has(id) ? f.delete(id) : f.add(id); guardarLocal("fav_" + yo.id, JSON.stringify([...f])); render(); },
+  async "activar-per"(d) {
+    const c = cursoDe(Number(d.c)), p = periodoDe(Number(d.p)); if (!c || !p) return;
+    const on = d.on === "1";
+    if (!on && !confirm("¿Cerrar este periodo? Los alumnos dejarán de ver sus notas hasta que lo actives otra vez.")) return;
+    try {
+      await rpc("activar_periodo", { p_periodo: p.id, p_curso: porCursoInst(c.institucion_id) ? c.id : null, p_activo: on });
+      activos = await sel("periodos_activos?select=periodo_id,curso_id,docente_id");
+      $("#dlgBody").innerHTML = htmlCurso(c, "notas"); toast(on ? p.nombre + " activado para los alumnos." : p.nombre + " cerrado para los alumnos.");
+    } catch (e) { toast(e.message); }
+  },
   "curso-ver"(d) { const c = cursoDe(idNum(d)); if (!c) return; abrirCompartido(`.ccard[data-id="${c.id}"] .banw`, "banner-curso", htmlCurso(c, "notas")); },
   async "curso-tab"(d) {
     const c = cursoDe(Number(d.c)); if (!c) return;

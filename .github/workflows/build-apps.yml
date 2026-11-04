@@ -34,8 +34,8 @@ jobs:
         with:
           name: windows
           path: |
-            app/electron/dist/Estudiantil-Setup.exe
-            app/electron/dist/Estudiantil-Setup.exe.blockmap
+            app/electron/dist/SINEVA-Setup.exe
+            app/electron/dist/SINEVA-Setup.exe.blockmap
             app/electron/dist/latest.yml
 
   android:
@@ -93,11 +93,11 @@ jobs:
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
-          cp app/build/outputs/apk/debug/app-debug.apk ../Estudiantil.apk
+          cp app/build/outputs/apk/debug/app-debug.apk ../SINEVA.apk
       - uses: actions/upload-artifact@v4
         with:
           name: android
-          path: app/android/Estudiantil.apk
+          path: app/android/SINEVA.apk
 
   publicar:
     needs: [windows, android]
@@ -116,13 +116,13 @@ jobs:
       - name: Publicar en la versión app-latest
         run: |
           ls -l salida
-          gh release view app-latest >/dev/null 2>&1 || gh release create app-latest --title "Programas (última versión)" --notes "Instalador para Windows (Estudiantil-Setup.exe) y APK para Android (Estudiantil.apk). Se actualizan solos al cambiar la carpeta app/."
-          gh release upload app-latest salida/Estudiantil-Setup.exe salida/Estudiantil-Setup.exe.blockmap salida/latest.yml salida/Estudiantil.apk --clobber
+          gh release view app-latest >/dev/null 2>&1 || gh release create app-latest --title "Programas (última versión)" --notes "Instalador para Windows (SINEVA-Setup.exe) y APK para Android (SINEVA.apk). Se actualizan solos al cambiar la carpeta app/."
+          gh release upload app-latest salida/SINEVA-Setup.exe salida/SINEVA-Setup.exe.blockmap salida/latest.yml salida/SINEVA.apk --clobber
       - name: Exigir la nueva versión a los programas instalados
         run: |
           V=$(jq -r .version version.json)
           B="https://github.com/${GH_REPO}/releases/download/app-latest"
-          jq -n --arg v "$V" --arg a "$B/Estudiantil.apk" --arg p "$B/Estudiantil-Setup.exe" '{requerida:$v, android:$a, pc:$p}' > actualizacion.json
+          jq -n --arg v "$V" --arg a "$B/SINEVA.apk" --arg p "$B/SINEVA-Setup.exe" '{requerida:$v, android:$a, pc:$p}' > actualizacion.json
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
           git add actualizacion.json
