@@ -495,10 +495,16 @@ create or replace function _docente_comparte_curso(p_perfil uuid) returns boolea
 
 -- El periodo esta abierto para los alumnos: es el primero de la institucion o el docente lo activo (en ese curso, o en su aula en primaria)
 create or replace function _periodo_visible(p_inst bigint, p_curso bigint, p_docente uuid, p_periodo bigint) returns boolean language sql stable security definer set search_path = public as $$
-  select exists (select 1 from periodos p where p.id = p_periodo and p.institucion_id = p_inst
-                 and p.orden = (select min(orden) from periodos where institucion_id = p_inst))
+  select case when exists (select 1 from instituciones where id = p_inst and tipo = 'universidad') then
+      -- universidad e instituto: los cursos cambian con el ciclo; el alumno ve hasta su ciclo actual (el personal, todos)
+      exists (select 1 from periodos p where p.id = p_periodo and p.institucion_id = p_inst
+              and (mi_rol() <> 'alumno' or p.orden <= coalesce((select ciclo from estudiantes where id = _mi_estudiante()), 1)))
+    else
+      exists (select 1 from periodos p where p.id = p_periodo and p.institucion_id = p_inst
+              and p.orden = (select min(orden) from periodos where institucion_id = p_inst))
       or exists (select 1 from periodos_activos a where a.periodo_id = p_periodo
-                 and ((_por_curso(p_inst) and a.curso_id = p_curso) or (not _por_curso(p_inst) and a.docente_id = p_docente))) $$;
+                 and ((_por_curso(p_inst) and a.curso_id = p_curso) or (not _por_curso(p_inst) and a.docente_id = p_docente)))
+    end $$;
 
 -- El usuario actual puede ver las tareas de ese curso (p_docente: quien las creo; en primaria solo cuentan las del tutor del alumno)
 create or replace function _tarea_visible(p_curso bigint, p_docente uuid) returns boolean language sql stable security definer set search_path = public as $$
@@ -1465,6 +1471,7 @@ begin
   select orden into v_ord from periodos where id = p_periodo and institucion_id = v_inst;
   if not found then raise exception 'Periodo invalido.'; end if;
   select min(orden) into v_min from periodos where institucion_id = v_inst;
+  if (select tipo from instituciones where id = v_inst) = 'universidad' then raise exception 'En universidades e institutos el ciclo avanza cuando el alumno pasa de ciclo.'; end if;
   if v_ord = v_min then raise exception 'El primer periodo siempre esta activo.'; end if;
   v_por := _por_curso(v_inst);
   if v_por then
@@ -1499,7 +1506,7 @@ begin
   select institucion_id into v_inst from cursos where id = p_curso;
   if v_inst is null or v_inst is distinct from mi_inst() then raise exception 'Curso invalido.'; end if;
   if not _tarea_visible(p_curso, auth.uid()) then raise exception 'No autorizado: ese curso no es tuyo.'; end if;
-  if not _por_curso(v_inst) and mi_rol() <> 'docente' then raise exception 'En primaria las tareas las crea el docente de cada aula.'; end if;
+  if mi_rol() <> 'docente' then raise exception 'Solo los docentes crean tareas.'; end if;
   p_titulo := trim(coalesce(p_titulo, ''));
   if length(p_titulo) < 1 or length(p_titulo) > 120 then raise exception 'Escribe el titulo de la tarea (maximo 120 letras).'; end if;
   insert into tareas (institucion_id, curso_id, docente_id, titulo, descripcion, limite)
@@ -1534,7 +1541,7 @@ begin
     if not found then raise exception 'Tarea no encontrada.'; end if;
   end if;
   if p_tipo = 'material' then
-    if mi_rol() not in ('admin', 'docente') or not _tarea_visible(p_curso, auth.uid()) then raise exception 'No autorizado.'; end if;
+    if mi_rol() <> 'docente' or not _tarea_visible(p_curso, auth.uid()) then raise exception 'Solo los docentes suben material.'; end if;
     if v_ext is null or v_ext not in ('pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt') then raise exception 'Solo se aceptan PDF, Word, PowerPoint, Excel o texto.'; end if;
     v_doc := coalesce(t.docente_id, auth.uid());
     insert into tarea_archivos (institucion_id, curso_id, tarea_id, tipo, docente_id, subido_por, nombre, mime, tam, contenido)

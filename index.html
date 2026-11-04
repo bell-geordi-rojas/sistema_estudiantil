@@ -536,12 +536,17 @@ const miCursos = () => yo && yo.institucion ? cursosDe(yo.institucion.id) : [];
 // Periodo abierto para los alumnos: el primero siempre; los demás los activa el docente (por curso, o por aula en primaria)
 const primerPeriodo = inst => Math.min(...periodosDe(inst).map(p => p.orden));
 const periodoAbierto = (p, c) => {
+  const inst = instDeId(p.institucion_id);
+  if (inst && inst.tipo === "universidad") {   // universidad e instituto: el alumno ve hasta su ciclo actual
+    if (yo.rol !== "alumno") return true;
+    const e = est.find(x => x.perfil_id === yo.id); return p.orden <= ((e && e.ciclo) || 1);
+  }
   if (p.orden === primerPeriodo(p.institucion_id)) return true;
   if (porCursoInst(p.institucion_id)) return activos.some(a => a.periodo_id === p.id && a.curso_id === c.id);
   const doc = yo.rol === "alumno" ? yo.docente_id : yo.id;
   return activos.some(a => a.periodo_id === p.id && a.docente_id === doc);
 };
-const puedeActivar = c => !!yo && (yo.rol === "docente" || (yo.rol === "admin" && porCursoInst(c.institucion_id)));
+const puedeActivar = c => !!yo && (yo.rol === "docente" || (yo.rol === "admin" && porCursoInst(c.institucion_id))) && !(instDeId(c.institucion_id) || {}).tipo?.startsWith("univ");
 const misPeriodos = () => {
   if (!yo || !yo.institucion) return [];
   const ps = periodosDe(yo.institucion.id);
@@ -549,7 +554,8 @@ const misPeriodos = () => {
   const e = est.find(x => x.perfil_id === yo.id), car = e && carreraDe(e.carrera_id);
   const dentro = car ? ps.filter(p => p.orden <= car.ciclos) : ps;   // el alumno solo ve los ciclos de su carrera
   const ini = primerPeriodo(yo.institucion.id);
-  return dentro.filter(p => p.orden === ini || activos.some(a => a.periodo_id === p.id));   // y solo los que el docente ya activó
+  if (yo.institucion.tipo === "universidad") return dentro.filter(p => p.orden <= ((e && e.ciclo) || 1));   // universidad e instituto: hasta su ciclo actual
+  return dentro.filter(p => p.orden === ini || activos.some(a => a.periodo_id === p.id));   // colegio: solo los que el docente ya activó
 };
 const nomPeriodos = tipo => tipo === "universidad" ? "ciclos" : "trimestres";   // nombre del periodo según el tipo de institución
 const nomPeriodo = tipo => tipo === "universidad" ? "Ciclo" : "Trimestre";
@@ -790,7 +796,7 @@ function vistasDisponibles() {
   if (r === "admin" && porCurso()) { v.push(["asignaciones", "☰", "Docentes y cursos"]); v.push(["inscripciones", "✓", "Inscripciones"]); }
   if (r === "alumno") { v.push(["mis", "★", "Mis notas"]); v.push(["tareas", "✐", "Tareas"]); v.push(["comentarios", "✎", "Mis comentarios"]); }
   else v.push(["lista", "☰", r === "dueno" ? "Estudiantes (lectura)" : "Estudiantes"]);
-  if (esStaff()) v.push(["tareas", "✐", "Tareas"]);
+  if (r === "docente") v.push(["tareas", "✐", "Tareas"]);
   if (esStaff() && p.editar_notas) v.push(["calificar", "✎", "Agregar calificación"]);
   if (r !== "alumno") v.push(["buscar", "⌕", "Buscar por código"]);
   if (r === "dueno" || p.ver_estadisticas) v.push(["estadisticas", "◔", "Estadísticas"]);
@@ -1474,7 +1480,7 @@ const idNum = d => Number(d.id);
 // Notas por periodo (trimestre o ciclo) en secciones desplegables: las notas del alumno o los alumnos del curso para el personal
 function cursoSecciones(c) {
     const alumno = yo.rol === "alumno", mio = alumno ? est.find(x => x.perfil_id === yo.id) : null;
-    const ps = periodosDe(c.institucion_id).filter(p => !c.carrera_id || p.orden <= ((carreraDe(c.carrera_id) || {}).ciclos || 14));
+    const ps = periodosDe(c.institucion_id).filter(p => c.ciclo && c.carrera_id ? p.orden === c.ciclo : (!c.carrera_id || p.orden <= ((carreraDe(c.carrera_id) || {}).ciclos || 14)));   // un curso de universidad/instituto solo tiene el ciclo al que pertenece
     const lista = alumno ? [] : est.filter(e => !porCursoInst(c.institucion_id) || inscrito(e.id, c.id) || e.deCurso(c.id, null).length);
     // un dato por periodo (trimestre o ciclo): sección desplegable con sus notas (alumno) o sus estudiantes (personal)
     const datos = ps.map(p => ({ p, ns: alumno ? (mio ? mio.deCurso(c.id, p.id) : []) : lista.flatMap(e => e.deCurso(c.id, p.id)) }));
@@ -1557,15 +1563,16 @@ function filaTarea(t, conCurso) {
 }
 function formTarea(cursoFijo) {
   const cs = cursosQueDicto(); if (!cs.length && !cursoFijo) return "";
+  const L = "display:grid;gap:4px;margin-bottom:10px;font-size:13px;color:var(--mute)";
   return `<form id="fTarea" class="card" style="margin:0 0 14px"><h2 style="margin-top:0">Nueva carpeta de tarea</h2>
-    ${cursoFijo ? `<input type="hidden" name="curso" value="${cursoFijo.id}">` : `<label>Curso<select name="curso" required>${cs.map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join("")}</select></label>`}
-    <label>Título<input name="titulo" maxlength="120" required placeholder="p. ej. Informe de la unidad 2"></label>
-    <label>Instrucciones (opcional)<textarea name="descripcion" rows="3" maxlength="2000"></textarea></label>
-    <label>Fecha límite (opcional)<input type="datetime-local" name="limite"></label>
+    ${cursoFijo ? `<input type="hidden" name="curso" value="${cursoFijo.id}">` : `<label style="${L}">Curso<select name="curso" required>${cs.map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join("")}</select></label>`}
+    <label style="${L}">Título<input name="titulo" maxlength="120" required placeholder="p. ej. Informe de la unidad 2"></label>
+    <label style="${L}">Instrucciones (opcional)<textarea name="descripcion" rows="3" maxlength="2000"></textarea></label>
+    <label style="${L}">Fecha límite (opcional)<input type="datetime-local" name="limite"></label>
     <div class="err"></div><button class="btn">Crear carpeta</button></form>`;
 }
 function tareasTab(c) {
-  const ts = tareasDeCurso(c), staff = esStaff() && (yo.rol === "admin" ? porCurso() : true), sueltos = archivos.filter(a => a.tipo === "material" && a.curso_id === c.id && !a.tarea_id);
+  const ts = tareasDeCurso(c), staff = yo.rol === "docente", sueltos = archivos.filter(a => a.tipo === "material" && a.curso_id === c.id && !a.tarea_id);
   const docs = `<div class="card" style="margin:0 0 14px"><h2 style="margin-top:0">Documentos del curso</h2>${listaArchivos(sueltos, staff)}${staff ? formSubida(c.id, null, "material") : ""}</div>`;
   return `<div data-cursotab="${c.id}">${staff ? formTarea(c) : ""}${docs}<h2 style="font-size:16px">Tareas</h2>${ts.length ? ts.map(t => filaTarea(t, false)).join("") : `<div class="empty">Aún no hay tareas en este curso.</div>`}</div>`;
 }
@@ -1597,7 +1604,7 @@ function htmlTarea(id) {
   }
   return `<div data-tarea="${t.id}"><div class="dhead"><div><b>${esc(t.titulo)}</b><small>${c ? esc(c.nombre) + " · " : ""}${t.limite ? "Fecha límite: " + fechaHora(t.limite) : "Sin fecha límite"}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>
     ${t.descripcion ? `<p style="white-space:pre-wrap">${esc(t.descripcion)}</p>` : ""}
-    <h3 style="font-size:15px">Material del docente</h3>${listaArchivos(mats, !alumno && dueno)}${!alumno && dueno ? formSubida(t.curso_id, t.id, "material") : ""}
+    <h3 style="font-size:15px">Material del docente</h3>${listaArchivos(mats, !alumno && dueno)}${yo.rol === "docente" ? formSubida(t.curso_id, t.id, "material") : ""}
     ${cuerpo}${!alumno && dueno ? `<hr class="sep"><button class="btn sec" data-a="tarea-borrar" data-id="${t.id}">Eliminar esta tarea y sus entregas</button>` : ""}</div>`;
 }
 function vTareas() {
