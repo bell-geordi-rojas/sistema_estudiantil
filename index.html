@@ -128,7 +128,16 @@ dialog::backdrop{background:rgba(10,14,24,.55)}
 .res{display:grid;gap:6px;margin-top:6px}
 .res button{text-align:left;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:9px 12px;border-radius:8px;font:inherit;cursor:pointer}
 .res button.on{border-color:var(--teal);background:var(--chip-on)}
-@media(max-width:900px){.layout{grid-template-columns:1fr}nav{display:flex;overflow:auto;border-right:0;border-bottom:1px solid var(--line)}nav button{white-space:nowrap;width:auto}nav .sep{display:none}.grid{grid-template-columns:1fr}.datos,.row2{grid-template-columns:1fr}main{padding:16px}}
+.menuwrap{position:relative;display:none}
+.menubtn{font-size:22px;line-height:1;padding:4px 12px;font-weight:700}
+.menupop{display:none;position:absolute;right:0;top:calc(100% + 8px);background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.4);min-width:250px;max-width:86vw;max-height:78vh;overflow:auto;padding:6px;z-index:40}
+.menupop.open{display:block}
+.menupop button{display:flex;width:100%;gap:10px;align-items:center;border:0;background:none;padding:12px;border-radius:8px;font:inherit;color:var(--ink);cursor:pointer;text-align:left}
+.menupop button:hover{background:var(--hover)}
+.menupop button.on{background:var(--violet-l);color:var(--nav-on);font-weight:600}
+.menupop .sep{border:0;border-top:1px solid var(--line);margin:6px 0}
+.menupop .badge{margin-left:auto;background:var(--red);color:#fff;border-radius:10px;padding:0 7px;font-size:11px;font-weight:700}
+@media(max-width:900px){.layout{grid-template-columns:1fr}nav{display:none}.menuwrap{display:block}.hbtn .txt{display:none}.grid{grid-template-columns:1fr}.datos,.row2{grid-template-columns:1fr}main{padding:16px}}
 </style>
 </head>
 <body>
@@ -687,11 +696,11 @@ function vCuenta() {
 }
 
 /* ===== Pantallas ===== */
-function cabecera(conUsuario) {
+function cabecera(conUsuario, menu = "") {
   const sub = yo && yo.institucion ? yo.institucion.nombre : "Propietario";
   return `<header><div class="logo"><i></i>ESTUDIANTIL</div><div class="sp"></div>
-    <button class="hbtn" data-a="tema" title="Cambiar entre modo claro y oscuro">${temaActual() === "dark" ? "☀ Modo claro" : "☾ Modo oscuro"}</button>
-    ${conUsuario ? `<div class="user">${avatarDe(nombreCompleto(yo), yo.usuario)}<div>${esc(nombreCompleto(yo))}<small>${ROL[yo.rol]} · ${esc(sub)}</small></div></div><button class="hbtn" data-a="salir">Salir</button>` : ""}</header>`;
+    <button class="hbtn" data-a="tema" title="Cambiar entre modo claro y oscuro">${temaActual() === "dark" ? "☀<span class=\"txt\"> Modo claro</span>" : "☾<span class=\"txt\"> Modo oscuro</span>"}</button>
+    ${conUsuario ? `<div class="user">${avatarDe(nombreCompleto(yo), yo.usuario)}<div>${esc(nombreCompleto(yo))}<small>${ROL[yo.rol]} · ${esc(sub)}</small></div></div><button class="hbtn" data-a="salir">Salir</button>` : ""}${menu ? `<div class="menuwrap"><button class="hbtn menubtn" data-a="menu" aria-label="Menú" title="Menú">⋮</button><div class="menupop" id="menuPop">${menu}</div></div>` : ""}</header>`;
 }
 function pantallaLogin() {
   const t = (id, txt) => `<button class="${tabLogin === id ? "on" : ""}" data-a="tab" data-id="${id}">${txt}</button>`;
@@ -725,7 +734,7 @@ function pantallaApp() {
   else cuerpo = { panel: vPanel, mis: vMis, lista: vLista, registrar: vRegistrar, calificar: vCalificar, buscar: vBuscar, estadisticas: vEstadisticas,
     usuarios: vUsuarios, solicitudes: vSolicitudes, invitar: vInvitar, instituciones: vInstituciones, carpetas: vCarpetas, cuenta: vCuenta, config: vConfig, comentarios: vComentarios, descargar: vDescargar }[vista]();
   const aviso = yo.rol === "dueno" && yo.mantenimiento ? `<div class="msg warn" style="border-radius:0;text-align:center">⚠ El sistema está en mantenimiento: solo tú puedes usarlo. Reanúdalo en «Instituciones».</div>` : "";
-  return `${cabecera(true)}${aviso}<div class="layout"><nav>${nav}</nav><main id="main">${cuerpo}</main></div>`;
+  return `${cabecera(true, nav)}${aviso}<div class="layout"><nav>${nav}</nav><main id="main">${cuerpo}</main></div>`;
 }
 function render() {
   $("#root").innerHTML = !yo ? pantallaLogin() : !yo.acceso ? pantallaBloqueo() : pantallaApp();
@@ -798,6 +807,7 @@ function abrirPermisos(p) {
 /* ===== Acciones (clics) ===== */
 const idNum = d => Number(d.id);
 const acciones = {
+  menu() { $("#menuPop").classList.toggle("open"); },
   async tema() { setTema(temaActual() === "dark" ? "light" : "dark"); render(); if (detalleId) renderDetalle(); },
   async salir() { cerrarDlg(); salir(); },
   async tab(d) { tabLogin = d.id; instSel = null; render(); },
@@ -906,6 +916,7 @@ function actualizarFormInvitar() {
 }
 
 document.addEventListener("click", async ev => {
+  if (!ev.target.closest(".menubtn")) { const pop = $("#menuPop"); if (pop) pop.classList.remove("open"); }
   const b = ev.target.closest("[data-v],[data-a]"); if (!b) return;
   if (b.dataset.v) { irA(b.dataset.v); return; }
   const fn = acciones[b.dataset.a]; if (!fn) return;
