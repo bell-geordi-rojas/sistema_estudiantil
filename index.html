@@ -772,6 +772,7 @@ async function agregarCal(c) {
 function vistasDisponibles() {
   const r = yo.rol, p = permisos, v = [["panel", "▦", "Panel principal"]];
   if (r !== "dueno") v.push(["cursos", "❖", r === "alumno" ? "Mis cursos" : "Cursos"]);
+  if (r === "admin" && esUni()) v.push(["carreras", "◈", "Carreras"]);
   if (r === "admin" && porCurso()) { v.push(["asignaciones", "☰", "Docentes y cursos"]); v.push(["inscripciones", "✓", "Inscripciones"]); }
   if (r === "alumno") { v.push(["mis", "★", "Mis notas"]); v.push(["comentarios", "✎", "Mis comentarios"]); if (p.ver_companeros) v.push(["lista", "☰", "Mis compañeros"]); }
   else v.push(["lista", "☰", r === "dueno" ? "Estudiantes (lectura)" : "Estudiantes"]);
@@ -1074,11 +1075,7 @@ function filaItem(tipo, x, extra = "") {
 }
 function vConfig() {
   const inst = yo.institucion, tipo = inst.tipo, uni = tipo === "universidad", cs = miCursos(), ps = misPeriodos(), cars = carrerasDe(inst.id);
-  const carrerasCard = uni && yo.rol === "admin" ? `<div class="card"><h2>Carreras <small>${cars.length}</small></h2>
-    <p style="margin-top:0;color:var(--mute)">Lista de carreras de tu universidad, ya cargada. Cada una tiene su número de ciclos (Medicina: 14; las demás: 10). Los alumnos y los cursos pertenecen a una carrera: agrega las que falten o quita las que no ofrezcas.</p>
-    <form class="bar" id="fCarrera"><input name="nombre" placeholder="Nueva carrera (p. ej. Odontología)" maxlength="80" required style="flex:1;min-width:220px"><select name="ciclos" title="Número de ciclos"><option value="">Ciclos: automático (Medicina 14, otras 10)</option>${[...Array(14)].map((_, i) => `<option value="${i + 1}">${i + 1} ciclos</option>`).join("")}</select><button class="btn">Agregar carrera</button></form><div class="err"></div>
-    <div class="scroll"><table><thead><tr><th>Carrera</th><th>Ciclos</th><th>Alumnos</th><th>Cursos</th><th></th></tr></thead><tbody>${cars.map(c => `<tr><td><input id="cn${c.id}" value="${esc(c.nombre)}" style="width:100%;min-width:180px"></td><td><select id="cc${c.id}">${[...Array(14)].map((_, i) => `<option value="${i + 1}" ${c.ciclos === i + 1 ? "selected" : ""}>${i + 1}</option>`).join("")}</select></td><td>${est.filter(e => e.carrera_id === c.id).length}</td><td>${cs.filter(x => x.carrera_id === c.id).length}</td>
-      <td style="white-space:nowrap"><button class="btn sm sec" data-a="carrera-guardar" data-id="${c.id}">Guardar</button> <button class="btn del" data-a="carrera-del" data-id="${c.id}">Quitar</button></td></tr>`).join("")}</tbody></table></div></div>` : "";
+  const avisoCarreras = uni && yo.rol === "admin" ? `<div class="msg">Las carreras, con sus cursos, alumnos y docentes, se administran en la sección <b>Carreras</b>. Aquí ves todos los cursos juntos.</div>` : "";
   const campoCarrera = uni ? `<select name="carrera" id="cursoCar" title="Carrera del curso"><option value="">Curso común (todas las carreras)</option>${cars.map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join("")}</select><select name="ciclo" id="cursoCiclo" title="Ciclo" disabled><option value="">Ciclo</option></select>` : "";
   const grupos = gruposCursos(cs);
   const cursosCard = `<div class="card"><h2>Cursos <small>${cs.length}</small></h2>
@@ -1089,7 +1086,7 @@ function vConfig() {
     <p style="margin-top:0;color:var(--mute)">Las notas se registran dentro de un ${nomPeriodo(tipo).toLowerCase()}. Quitar uno borra también sus notas (siempre debe quedar al menos uno).</p>
     <form class="bar" id="fPeriodo"><input name="nombre" placeholder="${tipo === "universidad" ? "p. ej. Ciclo 2026-II" : "p. ej. Trimestre 4"}" maxlength="40" required style="flex:1;min-width:220px"><button class="btn">Agregar ${nomPeriodo(tipo).toLowerCase()}</button></form><div class="err"></div>
     <div class="scroll"><table><tbody>${ps.map(p => filaItem("periodo", p)).join("")}</tbody></table></div></div>` : "";
-  return carrerasCard + cursosCard + perCard;
+  return avisoCarreras + cursosCard + perCard;
 }
 function vCarpetas() {
   const ul = items => `<ul>${items || "<li><small>—</small></li>"}</ul>`;
@@ -1103,6 +1100,58 @@ function vCarpetas() {
         return `<li><details><summary>📁 ${esc(d.usuario)} <small>${esc(nombreCompleto(d))}</small></summary><ul><li><details><summary>📁 Alumnos (${al.length})</summary>${ul(al.map(alumnoLi).join(""))}</details></li></ul></details></li>`; }).join("")}
         ${sinDoc.length ? `<li><details><summary>📁 _sin_docente (${sinDoc.length})</summary>${ul(sinDoc.map(alumnoLi).join(""))}</details></li>` : ""}</ul></details></li></ul></details></li>`; }).join("");
   return `<div class="card"><h2>Carpetas</h2><ul class="tree"><li><details open><summary>📁 <b>Admin</b> <small>${esc(nombreCompleto(yo))}</small></summary><ul>${arbol || "<li><small>Aún no hay instituciones.</small></li>"}</ul></details></li></ul></div>`;
+}
+/* ===== Carreras (universidad): dentro de cada una, sus cursos, alumnos y docentes ===== */
+let carreraSel = null, carTab = "cursos", preInv = null;
+const docentesDeCarrera = id => new Set(docCursos.filter(x => (cursoDe(x.curso_id) || {}).carrera_id === id).map(x => x.docente_id));
+function vCarreras() {
+  const inst = yo.institucion, cars = carrerasDe(inst.id), car = carreraSel && carreraDe(carreraSel);
+  if (car) return vCarreraDetalle(car);
+  carreraSel = null;
+  const tarjeta = c => `<div class="ccard" data-a="carrera-abrir" data-id="${c.id}"><div class="banw">${bannerCurso(1000 + c.id)}</div>
+    <div class="cb"><div class="ct">${esc(c.nombre)}</div><div class="cs">${c.ciclos} ciclos</div><div class="ci">${cursos.filter(x => x.carrera_id === c.id).length} curso(s) · ${est.filter(e => e.carrera_id === c.id).length} alumno(s) · ${docentesDeCarrera(c.id).size} docente(s)</div></div>
+    <div class="cm"><button class="btn sm" data-a="carrera-abrir" data-id="${c.id}">Abrir</button></div></div>`;
+  return `<div class="card"><h2>Carreras <small>${cars.length}</small></h2>
+    <p style="margin-top:0;color:var(--mute)">Elige una carrera para administrar sus <b>cursos</b>, <b>alumnos</b> y <b>docentes</b>. Medicina tiene 14 ciclos y las demás 10 (puedes cambiarlo).</p>
+    <form class="bar" id="fCarrera"><input name="nombre" placeholder="Nueva carrera (p. ej. Odontología)" maxlength="80" required style="flex:1;min-width:220px"><select name="ciclos" title="Número de ciclos"><option value="">Ciclos: automático (Medicina 14, otras 10)</option>${[...Array(14)].map((_, i) => `<option value="${i + 1}">${i + 1} ciclos</option>`).join("")}</select><button class="btn">Agregar carrera</button></form><div class="err"></div></div>` +
+    (cars.length ? `<div class="cgrid">${cars.map(tarjeta).join("")}</div>` : `<div class="card"><div class="empty">Aún no hay carreras. Agrega la primera arriba.</div></div>`);
+}
+function vCarreraDetalle(c) {
+  const tab = (k, n) => `<button class="${carTab === k ? "on" : ""}" data-a="car-tab" data-id="${k}">${n}</button>`;
+  const cab = `<div class="card"><h2><span><button class="btn sm sec" data-a="carrera-volver">← Carreras</button> &nbsp;${esc(c.nombre)} <small>${c.ciclos} ciclos</small></span></h2>
+    <div class="bar"><input id="cn${c.id}" value="${esc(c.nombre)}" style="flex:1;min-width:200px" aria-label="Nombre de la carrera"><select id="cc${c.id}" title="Ciclos">${[...Array(14)].map((_, i) => `<option value="${i + 1}" ${c.ciclos === i + 1 ? "selected" : ""}>${i + 1} ciclos</option>`).join("")}</select>
+    <button class="btn sm sec" data-a="carrera-guardar" data-id="${c.id}">Guardar</button><button class="btn del" data-a="carrera-del" data-id="${c.id}">Quitar carrera</button></div></div>
+    <div class="tabs" style="max-width:520px">${tab("cursos", "Cursos")}${tab("alumnos", "Alumnos")}${tab("docentes", "Docentes")}</div>`;
+  return cab + (carTab === "alumnos" ? tabAlumnosCar(c) : carTab === "docentes" ? tabDocentesCar(c) : tabCursosCar(c));
+}
+function tabCursosCar(c) {
+  const mine = cursos.filter(x => x.carrera_id === c.id), docs = docentesDe(yo.institucion.id);
+  const fila = x => `<tr><td>${esc(x.nombre)}<br><small>${docs.filter(d => docCursos.some(a => a.docente_id === d.id && a.curso_id === x.id)).map(d => esc(nombreCompleto(d))).join(", ") || "Sin docente"} · ${est.filter(e => inscrito(e.id, x.id)).length} inscrito(s)</small></td>
+    <td style="white-space:nowrap;text-align:right"><button class="btn sm sec" data-a="curso-ren" data-id="${x.id}">Renombrar</button> <button class="btn del" data-a="curso-del" data-id="${x.id}">Quitar</button></td></tr>`;
+  const ciclos = [...Array(c.ciclos)].map((_, i) => i + 1).map(n => { const l = ordenCursos(mine.filter(x => x.ciclo === n)); return l.length ? `<h3 style="margin:14px 0 4px;font-size:14px">Ciclo ${n}</h3><div class="scroll"><table><tbody>${l.map(fila).join("")}</tbody></table></div>` : ""; }).join("");
+  const sin = ordenCursos(mine.filter(x => !x.ciclo));
+  return `<div class="card"><h2>Cursos de ${esc(c.nombre)} <small>${mine.length}</small></h2>
+    <form class="bar" id="fCursoCar"><input name="nombre" placeholder="Nombre del curso nuevo" maxlength="80" required style="flex:1;min-width:220px"><select name="ciclo" title="Ciclo del curso">${[...Array(c.ciclos)].map((_, i) => `<option value="${i + 1}">Ciclo ${i + 1}</option>`).join("")}</select><button class="btn">Agregar curso</button></form><div class="err"></div>
+    ${mine.length ? ciclos + (sin.length ? `<h3 style="margin:14px 0 4px;font-size:14px">Sin ciclo</h3><div class="scroll"><table><tbody>${sin.map(fila).join("")}</tbody></table></div>` : "") : `<div class="empty">Esta carrera aún no tiene cursos: agrega el primero arriba.</div>`}</div>`;
+}
+function tabAlumnosCar(c) {
+  const al = est.filter(e => e.carrera_id === c.id), sin = est.filter(e => !e.carrera_id), propios = new Set(cursos.filter(x => x.carrera_id === c.id).map(x => x.id));
+  return `<div class="card"><h2>Alumnos de ${esc(c.nombre)} <small>${al.length}</small></h2>
+    <div class="bar"><button class="btn" data-a="car-reg-alumno">＋ Registrar alumno</button><button class="btn sec" data-a="car-reg-varios">＋ Registrar varios a la vez</button><button class="btn sec" data-a="car-ir-insc">Inscribir en cursos</button></div>
+    ${al.length ? `<div class="scroll"><table><thead><tr><th>Alumno</th><th>Cursos inscritos</th><th></th></tr></thead><tbody>` + al.map(e => `<tr><td><div class="who">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div>${esc(e.nombre)}<small>${esc(e.codigo)}</small></div></div></td><td>${inscr.filter(x => x.estudiante_id === e.id && (propios.has(x.curso_id))).length} de ${propios.size}</td>
+      <td><button class="btn sm sec" data-a="ver" data-id="${e.id}">Ver / editar</button> <button class="btn sm sec" data-a="ir-insc" data-id="${e.id}">Inscripciones</button></td></tr>`).join("") + `</tbody></table></div>` : `<div class="empty">Aún no hay alumnos en esta carrera.</div>`}
+    ${sin.length ? `<details class="acc" style="margin-top:14px"><summary><span>Alumnos sin carrera</span><small>${sin.length}</small></summary><div class="cuerpo"><div class="chips">${sin.map(e => `<label class="chk"><input type="checkbox" data-selsin="${e.id}">${esc(e.nombre)} <small>${esc(e.codigo)}</small></label>`).join("")}</div>
+      <div class="bar" style="margin-top:10px"><button class="btn" data-a="car-agregar-alumnos">Añadir los marcados a ${esc(c.nombre)}</button></div></div></details>` : ""}</div>`;
+}
+function tabDocentesCar(c) {
+  const mine = cursos.filter(x => x.carrera_id === c.id), docs = docentesDe(yo.institucion.id), aqui = docentesDeCarrera(c.id);
+  const nCar = d => docCursos.filter(x => x.docente_id === d.id && mine.some(m => m.id === x.curso_id)).length;
+  if (!docs.length) return `<div class="card"><h2>Docentes de ${esc(c.nombre)}</h2><div class="empty">Aún no hay docentes en la institución.</div><div class="bar"><button class="btn" data-a="car-reg-docente">＋ Registrar docente</button></div></div>`;
+  return `<div class="card"><h2>Docentes de ${esc(c.nombre)} <small>${aqui.size}</small></h2>
+    <p style="margin-top:0;color:var(--mute)">Marca los cursos de esta carrera que dicta cada docente (uno o varios). Un docente puede dictar en varias carreras.</p>
+    <div class="bar"><button class="btn" data-a="car-reg-docente">＋ Registrar docente</button></div>
+    ${!mine.length ? `<div class="empty">Primero agrega cursos a la carrera (pestaña Cursos).</div>` : docs.slice().sort((a, b) => (aqui.has(b.id) ? 1 : 0) - (aqui.has(a.id) ? 1 : 0)).map(d => `<details class="acc" ${aqui.has(d.id) ? "open" : ""}><summary><span>${esc(nombreCompleto(d))}</span><small id="asigN${d.id}">${nCar(d)} de ${mine.length} curso(s) de esta carrera</small></summary><div class="cuerpo">` +
+      [...Array(c.ciclos)].map((_, i) => i + 1).map(n => { const l = ordenCursos(mine.filter(x => x.ciclo === n)); return l.length ? `<div style="font-weight:600;margin:10px 0 4px">Ciclo ${n}</div><div class="chips">${l.map(x => `<label class="chk"><input type="checkbox" data-asig="${d.id}|${x.id}" ${docCursos.some(a => a.docente_id === d.id && a.curso_id === x.id) ? "checked" : ""}>${esc(x.nombre)}</label>`).join("")}</div>` : ""; }).join("") + `</div></details>`).join("")}</div>`;
 }
 /* ===== Docentes por curso e inscripciones (administrador; secundaria y universidad) ===== */
 let insc = { modo: "curso", carrera: "", curso: "", alumno: "", filtro: "" };
@@ -1283,7 +1332,7 @@ function pantallaApp() {
   let cuerpo;
   if (avisoCarga) cuerpo = `<div class="card"><h2>No se pudieron cargar los datos</h2><p class="err">${esc(avisoCarga)}</p><button class="btn" data-a="reintentar">Reintentar</button></div>`;
   else cuerpo = { panel: vPanel, mis: vMis, lista: vLista, registrar: vRegistrar, calificar: vCalificar, buscar: vBuscar, estadisticas: vEstadisticas,
-    usuarios: vUsuarios, solicitudes: vSolicitudes, invitar: vInvitar, instituciones: vInstituciones, carpetas: vCarpetas, cuenta: vCuenta, config: vConfig, comentarios: vComentarios, descargar: vDescargar, cursos: vCursos, correo: vCorreo, asignaciones: vAsignaciones, inscripciones: vInscripciones }[vista]();
+    usuarios: vUsuarios, solicitudes: vSolicitudes, invitar: vInvitar, instituciones: vInstituciones, carpetas: vCarpetas, cuenta: vCuenta, config: vConfig, comentarios: vComentarios, descargar: vDescargar, cursos: vCursos, correo: vCorreo, asignaciones: vAsignaciones, inscripciones: vInscripciones, carreras: vCarreras }[vista]();
   const aviso = yo.rol === "dueno" && yo.mantenimiento ? `<div class="msg warn" style="border-radius:0;text-align:center">⚠ El sistema está en mantenimiento: solo tú puedes usarlo. Reanúdalo en «Instituciones».</div>` : "";
   return `${cabecera(true, nav)}${aviso}<div class="layout"><nav>${nav}</nav><main id="main">${cuerpo}</main></div>`;
 }
@@ -1447,7 +1496,20 @@ const acciones = {
   async "carrera-guardar"(d) { const id = idNum(d); await rpc("editar_carrera", { p_id: id, p_nombre: $(`#cn${id}`).value, p_ciclos: Number($(`#cc${id}`).value) }); await recargarTodo(); toast("Carrera actualizada."); },
   async "carrera-del"(d) {
     const c = carreraDe(idNum(d)), nc = cursos.filter(x => x.carrera_id === c.id).length;
-    if (confirm(`¿Quitar la carrera «${c.nombre}»?` + (nc ? ` Se borrarán también sus ${nc} curso(s).` : ""))) { await rpc("eliminar_carrera", { p_id: c.id }); await recargarTodo(); toast("Carrera eliminada."); }
+    if (confirm(`¿Quitar la carrera «${c.nombre}»?` + (nc ? ` Se borrarán también sus ${nc} curso(s).` : ""))) { await rpc("eliminar_carrera", { p_id: c.id }); if (carreraSel === c.id) carreraSel = null; await recargarTodo(); toast("Carrera eliminada."); }
+  },
+  "carrera-abrir"(d) { carreraSel = idNum(d); carTab = "cursos"; conTransicion(render); },
+  "carrera-volver"() { carreraSel = null; conTransicion(render); },
+  "car-tab"(d) { carTab = d.id; conTransicion(render); },
+  "car-reg-alumno"() { invModo = "uno"; preInv = { rol: "alumno", carrera: String(carreraSel) }; irA("invitar"); },
+  "car-reg-varios"() { invModo = "masivo"; masivo = nuevoMasivo({ rol: "alumno", carrera: String(carreraSel) }); irA("invitar"); },
+  "car-reg-docente"() { invModo = "uno"; preInv = { rol: "docente" }; irA("invitar"); },
+  "car-ir-insc"() { insc = { modo: "curso", carrera: String(carreraSel), curso: "", alumno: "", filtro: "" }; irA("inscripciones"); },
+  async "car-agregar-alumnos"() {
+    const ids = [...document.querySelectorAll("[data-selsin]:checked")].map(x => Number(x.dataset.selsin));
+    if (!ids.length) { toast("Marca al menos un alumno."); return; }
+    await Promise.all(ids.map(id => rpc("cambiar_carrera_estudiante", { p_est: id, p_carrera: carreraSel })));
+    await recargarTodo(); toast(`${ids.length} alumno(s) añadido(s) a la carrera.`);
   },
   "insc-modo"(d) { insc.modo = d.id; conTransicion(render); },
   async "insc-aplicar"(d) {
@@ -1626,6 +1688,8 @@ const acciones = {
 };
 function actualizarFormInvitar() {
   const f = $("#fInv"); if (!f) return;
+  let carreraPre = "";
+  if (preInv) { f.rol.value = preInv.rol; carreraPre = preInv.carrera || ""; preInv = null; }   // viene desde una carrera: rol y carrera ya elegidos
   const instId = yo.rol === "dueno" ? Number(f.inst.value) : yo.institucion.id, inst = instDeId(instId);
   const alumno = f.rol.value === "alumno", card = f.closest(".card"), pc = porCursoInst(instId), uni = !!inst && inst.tipo === "universidad";
   card.querySelector("h2").textContent = tituloFormInv(alumno);   // el título sigue al rol elegido
@@ -1638,7 +1702,7 @@ function actualizarFormInvitar() {
   const cw = $("#invCarWrap");
   if (cw) {
     const actual = f.carrera.value; cw.style.display = alumno && uni ? "" : "none"; f.carrera.required = alumno && uni;
-    f.carrera.innerHTML = `<option value="">Elige la carrera</option>` + carrerasDe(instId).map(c => `<option value="${c.id}">${esc(c.nombre)} (${c.ciclos} ciclos)</option>`).join(""); f.carrera.value = actual;
+    f.carrera.innerHTML = `<option value="">Elige la carrera</option>` + carrerasDe(instId).map(c => `<option value="${c.id}">${esc(c.nombre)} (${c.ciclos} ciclos)</option>`).join(""); f.carrera.value = carreraPre || actual;
   }
 }
 
@@ -1701,7 +1765,11 @@ document.addEventListener("change", ev => {
     const [doc, cur] = t.dataset.asig.split("|"), marcado = t.checked, cid = Number(cur);
     rpc("asignar_curso_docente", { p_docente: doc, p_curso: cid, p_asignar: marcado }).then(() => {
       docCursos = docCursos.filter(x => !(x.docente_id === doc && x.curso_id === cid)); if (marcado) docCursos.push({ docente_id: doc, curso_id: cid });
-      const el = $("#asigN" + doc); if (el) el.textContent = docCursos.filter(x => x.docente_id === doc).length + " curso(s)";
+      const el = $("#asigN" + doc);
+      if (el) {
+        if (vista === "carreras" && carreraSel) { const ids = new Set(cursos.filter(x => x.carrera_id === carreraSel).map(x => x.id)); el.textContent = docCursos.filter(x => x.docente_id === doc && ids.has(x.curso_id)).length + " de " + ids.size + " curso(s) de esta carrera"; }
+        else el.textContent = docCursos.filter(x => x.docente_id === doc).length + " curso(s)";
+      }
     }).catch(e => { t.checked = !marcado; toast(e.message); });
   }
   else if (t.id === "fotoIn") subirFoto(t.files[0]).catch(e => toast(e.message));
@@ -1772,6 +1840,8 @@ document.addEventListener("submit", ev => {
       yo = await rpc("mi_sesion"); render(); toast(pausar ? "Sistema en pausa." : "Sistema reanudado.");
     } else if (f.id === "fCurso") {
       await rpc("crear_curso", { p_nombre: d.nombre, p_carrera: d.carrera ? Number(d.carrera) : null, p_ciclo: d.ciclo ? Number(d.ciclo) : null }); await recargarTodo(); toast("Curso agregado.");
+    } else if (f.id === "fCursoCar") {
+      await rpc("crear_curso", { p_nombre: d.nombre, p_carrera: carreraSel, p_ciclo: d.ciclo ? Number(d.ciclo) : null }); await recargarTodo(); toast("Curso agregado a la carrera.");
     } else if (f.id === "fCarrera") {
       await rpc("crear_carrera", { p_nombre: d.nombre, p_ciclos: d.ciclos ? Number(d.ciclos) : null }); await recargarTodo(); toast("Carrera agregada.");
     } else if (f.id === "fPeriodo") {
