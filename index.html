@@ -243,14 +243,21 @@ async function comprobarActualizacion() {
 }
 // Android (app con el plugin «Instalador», desde la 1.2.0): descarga el APK y abre el instalador del sistema para actualizar encima
 const instaladorNativo = () => { try { return OS_APP === "android" && !!window.Capacitor && window.Capacitor.isPluginAvailable("Instalador"); } catch { return false; } };
-let pluginInstalador = null, instalando = false;
+let instalando = false;
+// En una app que carga la web desde internet, Capacitor solo ofrece el puente nativo (Capacitor.Plugins / nativePromise), sin registerPlugin
+function llamarInstalador(opciones) {
+  const cap = window.Capacitor || {};
+  if (cap.Plugins && cap.Plugins.Instalador && cap.Plugins.Instalador.instalar) return cap.Plugins.Instalador.instalar(opciones);
+  if (typeof cap.nativePromise === "function") return cap.nativePromise("Instalador", "instalar", opciones);
+  if (typeof cap.registerPlugin === "function") return cap.registerPlugin("Instalador").instalar(opciones);
+  return Promise.reject(new Error("El puente nativo no está disponible en esta versión de la app."));
+}
 async function instalarAndroid() {
   if (instalando || !actualizacion) return; instalando = true;
   const est = t => { const e = $("#estadoAct"); if (e) e.textContent = t; };
   try {
     est("Descargando la actualización…");
-    pluginInstalador = pluginInstalador || window.Capacitor.registerPlugin("Instalador");
-    await pluginInstalador.instalar({ url: actualizacion.android || DESCARGAS.android });
+    await llamarInstalador({ url: actualizacion.android || DESCARGAS.android });
     est("Pulsa «Actualizar» en la ventana de Android. Si no apareció, usa el botón de abajo.");
   } catch (e) {
     const m = (e && e.message) || "";
@@ -912,7 +919,7 @@ function pantallaActualizar() {
     <h2 style="margin:0 0 8px">Actualización obligatoria</h2>
     <p style="margin:0 0 14px;color:var(--mute)">Hay una versión nueva del programa (<b>${esc(a.requerida)}</b>; tienes la ${esc(VERSION_APP === "0.0.0" ? "anterior" : VERSION_APP)}). Para seguir usando el sistema debes actualizarlo.</p>
     ${instaladorNativo()
-      ? `<p id="estadoAct" class="msg warn">Preparando la actualización…</p><button class="btn" data-a="instalar-android">⬇ Actualizar ahora</button>`
+      ? `<p id="estadoAct" class="msg warn">Preparando la actualización…</p><button class="btn" data-a="instalar-android">⬇ Actualizar ahora</button><p style="margin:12px 0 0;font-size:13px"><a href="${esc(a.android || DESCARGAS.android)}">¿No funciona? Descarga el APK a mano</a></p>`
       : `<a class="btn" href="${esc(a[OS_APP] || DESCARGAS[OS_APP])}" style="display:inline-block;text-decoration:none">⬇ Descargar la actualización</a>
     <ol style="color:var(--mute);margin:14px 0 0;padding-left:20px;line-height:1.6;font-size:13px">${(pc && cmpVer(VERSION_APP, "1.2.0") >= 0
       ? ["El programa se actualiza solo al abrirlo, pero esta vez no pudo (¿sin internet?).", "Ciérralo y ábrelo de nuevo con conexión, o instala el archivo descargado."]
