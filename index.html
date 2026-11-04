@@ -1015,13 +1015,16 @@ function vMantenimiento() {
 function vInstituciones() {
   const crear = yo.rol === "dueno" ? vMantenimiento() + `<div class="card"><h2>Nueva institución afiliada</h2><form class="bar" id="fInst">
       <input name="nombre" placeholder="Nombre (p. ej. María Auxiliadora)" required style="flex:1;min-width:220px">
-      <input name="dominio" placeholder="Dominio de correo (ej. midominio.edu)" style="min-width:210px" autocapitalize="none">
+      <input name="dominio" id="instDom" placeholder="Dominio de correo (ej. midominio.edu)" style="min-width:210px" autocapitalize="none">
+      <select name="workspace" id="instWs" title="Google Workspace de la institución"><option value="no">Sin Google Workspace (cuentas solo del sistema)</option><option value="si">Ya tiene Google Workspace (dominio obligatorio)</option></select>
       <select name="tipo" title="Tipo de institución"><option value="colegio">Colegio (trimestres)</option><option value="universidad">Universidad (ciclos y notas con peso)</option></select>
-      <label style="display:flex;gap:6px;align-items:center">Vence <input type="date" name="vence"></label><button class="btn">Crear</button></form><div class="err"></div></div>` : "";
-  const tabla = insts.length ? `<div class="scroll"><table><thead><tr><th>Institución</th><th>Tipo</th><th>Correo institucional</th><th>Carpeta</th><th>Docentes</th><th>Estudiantes</th><th>Vence</th><th>Estado</th><th></th></tr></thead><tbody>` +
+      <label style="display:flex;gap:6px;align-items:center">Vence <input type="date" name="vence"></label><button class="btn">Crear</button></form><div class="err"></div>
+      <p style="margin:10px 0 0;color:var(--mute);font-size:13px">Google no permite crear un Google Workspace nuevo desde otra aplicación (solo lo contrata la propia institución, con su dominio; las instituciones educativas elegibles pueden pedir <i>Google Workspace for Education</i>, gratuito). Si ya lo tiene, elige «Ya tiene Google Workspace» y escribe su dominio: el administrador de la institución lo conecta después en «Correo institucional» y activa la creación de cuentas reales.</p></div>` : "";
+  const tabla = insts.length ? `<div class="scroll"><table><thead><tr><th>Institución</th><th>Tipo</th><th>Correo institucional</th><th>Google</th><th>Carpeta</th><th>Docentes</th><th>Estudiantes</th><th>Vence</th><th>Estado</th><th></th></tr></thead><tbody>` +
     insts.map(i => { const c = conteoInst(i), vencida = i.vence && i.vence < new Date().toISOString().slice(0, 10);
       return `<tr><td><b>${esc(i.nombre)}</b></td><td><span class="tag">${i.tipo === "universidad" ? "Universidad" : "Colegio"}</span></td>
-      <td style="white-space:nowrap"><input id="dom${i.id}" value="${esc(i.dominio || "")}" placeholder="midominio.edu" style="width:130px" autocapitalize="none"> <button class="btn sm sec" data-a="inst-dominio" data-id="${i.id}">Guardar</button></td><td><code>Admin/${esc(i.slug)}</code></td><td>${c.docentes}</td><td>${c.estudiantes}</td>
+      <td style="white-space:nowrap"><input id="dom${i.id}" value="${esc(i.dominio || "")}" placeholder="midominio.edu" style="width:130px" autocapitalize="none"> <button class="btn sm sec" data-a="inst-dominio" data-id="${i.id}">Guardar</button></td>
+      <td>${i.google_workspace ? `<span class="pill ok" style="white-space:normal">Cuentas reales</span>` : i.dominio ? `<small>Solo correo del sistema</small>` : `<small>—</small>`}</td><td><code>Admin/${esc(i.slug)}</code></td><td>${c.docentes}</td><td>${c.estudiantes}</td>
       <td><input type="date" id="vence${i.id}" value="${esc(i.vence || "")}"></td>
       <td><span class="pill ${i.activa && !vencida ? "ok" : "no"}">${!i.activa ? "Suspendida" : vencida ? "Vencida" : "Activa"}</span></td>
       <td style="white-space:nowrap"><button class="btn sm sec" data-a="inst-guardar" data-id="${i.id}">Guardar fecha</button>
@@ -1531,6 +1534,7 @@ document.addEventListener("change", ev => {
   else if (t.id === "invRol" || t.id === "invInst") actualizarFormInvitar();
   else if (t.id === "perSel") { periodoSel = t.value ? Number(t.value) : null; conTransicion(render); if (detalleId) renderDetalle(); }
   else if (t.id === "perCal") repintarCal();
+  else if (t.id === "instWs") { const dom = $("#instDom"); dom.required = t.value === "si"; if (t.value === "si") dom.focus(); }
   else if (t.id === "mInst" || t.id === "mRol") {
     masivo.texto = $("#masTexto").value; masivo.orden = $("#fMas").orden.value;
     if (t.id === "mInst") { masivo.inst = t.value; masivo.docente = ""; } else masivo.rol = t.value;
@@ -1594,8 +1598,9 @@ document.addEventListener("submit", ev => {
         p_institucion: d.inst ? Number(d.inst) : null, p_docente: d.rol === "alumno" && d.docente ? d.docente : null, p_correo: (d.correo || "").trim() || null });
       await recargarTodo(); mostrarCredenciales(v);
     } else if (f.id === "fInst") {
+      if (d.workspace === "si" && !(d.dominio || "").trim()) falla("Si la institución ya tiene Google Workspace, escribe su dominio (por ejemplo midominio.edu).");
       const nuevaId = await rpc("crear_institucion", { p_nombre: d.nombre, p_vence: d.vence || null, p_tipo: d.tipo });
-      if ((d.dominio || "").trim()) await rpc("actualizar_dominio", { p_inst: nuevaId, p_dominio: d.dominio }); await recargarTodo(); toast("Institución creada. Ahora crea su administrador.");
+      if ((d.dominio || "").trim()) await rpc("actualizar_dominio", { p_inst: nuevaId, p_dominio: d.dominio }); await recargarTodo(); toast(d.workspace === "si" ? "Institución creada. Ahora crea su administrador: él conectará su Google Workspace en «Correo institucional»." : "Institución creada. Ahora crea su administrador.");
     } else if (f.id === "fMant") {
       const pausar = !yo.mantenimiento;
       if (pausar && !confirm("¿Pausar el sistema? Nadie más que tú podrá entrar ni usarlo hasta que lo reanudes.")) return;
