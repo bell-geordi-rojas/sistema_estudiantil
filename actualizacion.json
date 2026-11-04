@@ -1,5 +1,5 @@
 {
-  "requerida": "1.2.2",
-  "android": "https://github.com/bell786u-ctrl/sistema_estudiantil/releases/download/app-latest/Estudiantil.apk",
-  "pc": "https://github.com/bell786u-ctrl/sistema_estudiantil/releases/download/app-latest/Estudiantil-Setup.exe"
+  "requerida": "1.3.0",
+  "android": "https://github.com/bell786u-ctrl/sistema_estudiantil/releases/download/app-latest/SINEVA.apk",
+  "pc": "https://github.com/bell786u-ctrl/sistema_estudiantil/releases/download/app-latest/SINEVA-Setup.exe"
 }
