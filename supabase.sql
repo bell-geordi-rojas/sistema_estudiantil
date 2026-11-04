@@ -216,6 +216,15 @@ create table if not exists invitaciones (
 alter table invitaciones add column if not exists correo text
   check (correo is null or (length(correo) <= 120 and correo ~* '^[^@\s]+@[^@\s]+\.[^@\s]+$'));
 
+-- Conexion de correo de cada institucion: el Apps Script de la cuenta de Google de su director/administrador.
+-- Sin politicas de lectura: la URL y la clave nunca llegan al navegador (solo se escriben por funciones).
+create table if not exists instituciones_correo (
+  institucion_id bigint primary key references instituciones (id) on delete cascade,
+  url text not null,
+  secreto text not null
+);
+alter table instituciones_correo enable row level security;
+
 -- El envio de credenciales usa pg_net para llamar a un Google Apps Script que manda el correo desde tu Gmail
 do $$ begin create extension if not exists pg_net; exception when others then raise notice 'pg_net no esta disponible: los correos no se enviaran automaticamente.'; end $$;
 
@@ -469,9 +478,11 @@ begin
     'id', p.id, 'usuario', p.usuario, 'nombres', p.nombres, 'apellidos', p.apellidos, 'rol', p.rol, 'foto', p.foto,
     'docente_id', p.docente_id, 'acceso', v_ok, 'motivo', v_motivo,
     'mantenimiento', en_mantenimiento(), 'mensaje_mantenimiento', (select valor from config where clave = 'mantenimiento_msg'),
-    'correo', exists (select 1 from config where clave = 'correo_url') and exists (select 1 from config where clave = 'correo_secreto'),
+    'correo', exists (select 1 from instituciones_correo where institucion_id = p.institucion_id)
+              or (exists (select 1 from config where clave = 'correo_url') and exists (select 1 from config where clave = 'correo_secreto')),
     'institucion', case when i.id is null then null
-                        else jsonb_build_object('id', i.id, 'nombre', i.nombre, 'slug', i.slug, 'vence', i.vence, 'tipo', i.tipo, 'dominio', i.dominio) end,
+                        else jsonb_build_object('id', i.id, 'nombre', i.nombre, 'slug', i.slug, 'vence', i.vence, 'tipo', i.tipo, 'dominio', i.dominio,
+                                                  'correo_propio', exists (select 1 from instituciones_correo where institucion_id = i.id)) end,
     'permisos', (select jsonb_object_agg(k, permiso(k)) from unnest(claves_permiso()) as k));
 end $$;
 
@@ -531,8 +542,11 @@ create or replace function _enviar_credenciales(p_correo text, p_nombre text, p_
 language plpgsql security definer set search_path = public as $$
 declare v_url text; v_sec text; v_nom text;
 begin
-  select valor into v_url from config where clave = 'correo_url';
-  select valor into v_sec from config where clave = 'correo_secreto';
+  select url, secreto into v_url, v_sec from instituciones_correo where institucion_id = p_inst;   -- cuenta de Google de la propia institucion
+  if v_url is null then
+    select valor into v_url from config where clave = 'correo_url';                                -- si no, la conexion general del sistema (si el dueno la configuro)
+    select valor into v_sec from config where clave = 'correo_secreto';
+  end if;
   if v_url is null or v_sec is null or p_correo is null then return false; end if;
   select nombre into v_nom from instituciones where id = p_inst;
   perform net.http_post(url := v_url, headers := jsonb_build_object('Content-Type', 'application/json'),
@@ -996,6 +1010,42 @@ end $$;
 -- ---------------------------------------------------------------------------
 -- 10. Primera cuenta: el dueno (se ejecuta una vez, a mano, con TU usuario y TU codigo secreto)
 -- ---------------------------------------------------------------------------
+-- Cada administrador conecta la cuenta de Google de su institucion (desde la pantalla «Correo»); el dueno puede indicar p_inst
+create or replace function configurar_correo_institucion(p_url text, p_secreto text, p_inst bigint default null) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_inst bigint;
+begin
+  if mi_rol() = 'dueno' then v_inst := p_inst; elsif mi_rol() = 'admin' then v_inst := mi_inst(); else raise exception 'No autorizado.'; end if;
+  if v_inst is null or not exists (select 1 from instituciones where id = v_inst) then raise exception 'Institucion invalida.'; end if;
+  p_url := trim(coalesce(p_url, ''));
+  if p_url !~ '^https://script\.google\.com/(a/macros/[^/]+/|macros/)s/[A-Za-z0-9_-]+/exec$' then
+    raise exception 'La URL debe ser la de tu aplicacion web de Apps Script y terminar en /exec.';
+  end if;
+  if length(coalesce(p_secreto, '')) < 12 or length(p_secreto) > 100 then raise exception 'La clave secreta debe tener entre 12 y 100 caracteres.'; end if;
+  insert into instituciones_correo (institucion_id, url, secreto) values (v_inst, p_url, p_secreto)
+    on conflict (institucion_id) do update set url = excluded.url, secreto = excluded.secreto;
+end $$;
+
+create or replace function quitar_correo_institucion(p_inst bigint default null) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_inst bigint;
+begin
+  if mi_rol() = 'dueno' then v_inst := p_inst; elsif mi_rol() = 'admin' then v_inst := mi_inst(); else raise exception 'No autorizado.'; end if;
+  delete from instituciones_correo where institucion_id = v_inst;
+end $$;
+
+-- Manda un correo de prueba a p_correo con la conexion de la institucion del administrador
+create or replace function probar_correo(p_correo text) returns boolean
+language plpgsql security definer set search_path = public as $$
+declare v_dom text;
+begin
+  if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
+  p_correo := lower(trim(coalesce(p_correo, '')));
+  if p_correo !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then raise exception 'Correo invalido.'; end if;
+  select dominio into v_dom from instituciones where id = mi_inst();
+  return _enviar_credenciales(p_correo, 'Prueba de envio', case when v_dom is null then null else 'usuarioprueba@' || v_dom end, 'usuarioprueba', 'PRUEBA-0000', mi_inst(), 'alumno');
+end $$;
+
 -- Conecta el envio de correos (se ejecuta una sola vez, a mano, desde el SQL Editor):
 --   select configurar_correo('https://script.google.com/macros/s/XXXX/exec', 'el-secreto-del-script');
 create or replace function configurar_correo(p_url text, p_secreto text) returns void
@@ -1030,7 +1080,7 @@ begin
              'actualizar_institucion', 'actualizar_permisos', 'actualizar_estado_perfil', 'restablecer_contrasena',
              'cambiar_rol', 'eliminar_cuenta', 'regenerar_codigo', 'eliminar_invitacion', 'registrar_estudiante', 'actualizar_estudiante', 'reasignar_docente',
              'eliminar_estudiante', 'agregar_nota', 'actualizar_nota', 'eliminar_nota',
-             'cambiar_tipo_institucion', 'eliminar_institucion', 'crear_invitaciones_masivo', 'actualizar_dominio', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
+             'cambiar_tipo_institucion', 'eliminar_institucion', 'crear_invitaciones_masivo', 'actualizar_dominio', 'configurar_correo_institucion', 'quitar_correo_institucion', 'probar_correo', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
              'crear_periodo', 'renombrar_periodo', 'eliminar_periodo', 'actualizar_mi_perfil', 'actualizar_mi_foto'])
   loop
     execute format('revoke all on function %s from public, anon', f);

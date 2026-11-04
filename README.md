@@ -42,13 +42,10 @@ El instalador de Windows no tiene firma digital (SmartScreen avisa) y el APK est
 - Cada institución puede tener un **dominio de correo** (p. ej. `midominio.edu`; lo define el dueño en «Instituciones» o el administrador en su pantalla de cursos). Con él, el usuario de una cuenta nueva se genera con el patrón institucional: inicial del 1.er apellido + 2.º apellido + inicial del nombre. «Juan Carlos Pérez Gómez» → `pgomezj@midominio.edu`. Si ya existe se agrega un número. Se puede entrar escribiendo `pgomezj` o el correo completo.
   > Es el *usuario dentro de este sistema* con formato de correo institucional: no crea un buzón real en Google Workspace (eso solo lo hace el área de TI de la universidad).
 - **Registrar varios a la vez:** en «Registrar estudiante → Varios a la vez» se pega una persona por línea (`nombre completo, correo personal`), se revisa la lista y se crean todas; las credenciales se envían a cada correo personal y se puede descargar un CSV de respaldo.
-- **Conectar Gmail (una sola vez):** el correo sale desde tu Gmail con un Google Apps Script que llama la base de datos (`pg_net`), así la clave de envío nunca llega al navegador.
-  1. Entra en <https://script.google.com> → *Nuevo proyecto* → pega el contenido de [`google/correo.gs`](google/correo.gs).
-  2. Engranaje *Configuración del proyecto* → *Propiedades de la secuencia de comandos* → agrega `SECRETO` con una clave larga y privada.
-  3. *Implementar → Nueva implementación → Aplicación web*; *Ejecutar como: Yo*; *Acceso: Cualquier persona*; autoriza el envío de correos y copia la URL (termina en `/exec`).
-  4. En el SQL Editor de Supabase: `select configurar_correo('URL-COPIADA', 'LA-MISMA-CLAVE-SECRETO');`
-  Límite de Gmail: unos 100 correos por día en cuentas personales (1500 en Google Workspace); los que excedan no se envían, pero las cuentas se crean y salen en el CSV.
-
+- **Los correos salen desde la cuenta de Google de cada institución** (la del director o la institucional), no desde la del dueño. Cada administrador lo conecta una sola vez en **Correo institucional → Envío de credenciales por Gmail**: copia el código, lo pega en <https://script.google.com> con esa cuenta, publica la aplicación web, y pega aquí la URL y la clave. El botón «Enviar correo de prueba» comprueba la conexión. El código del script está en [`google/correo.gs`](google/correo.gs) (y embebido en la web).
+  La base de datos llama a ese script con `pg_net`; la URL y la clave se guardan en una tabla cerrada y nunca llegan al navegador.
+  Si una institución no conecta su cuenta, se usa —si existe— la conexión general del dueño (`select configurar_correo('URL', 'CLAVE');`); para desactivarla: `delete from config where clave in ('correo_url', 'correo_secreto');`.
+  Límite de Gmail: unos 100 correos por día en cuentas personales (1500 en Google Workspace, lo habitual en un colegio o universidad); los que excedan no se envían, pero las cuentas se crean y salen en el CSV.
 ### Publicar una versión nueva (actualización obligatoria)
 
 1. Sube el número de `version.json` (p. ej. `1.1.0` → `1.2.0`) y haz commit/push (también se puede ejecutar a mano en *Actions → Compilar programas*).
