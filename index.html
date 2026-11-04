@@ -508,7 +508,7 @@ async function activarCuenta(usuario, codigo, clave) {
 class Estudiante {
   constructor(d) {
     this.id = d.id; this.codigo = d.codigo; this.nombre = d.nombre; this.docente_id = d.docente_id;
-    this.perfil_id = d.perfil_id; this.institucion_id = d.institucion_id; this.carrera_id = d.carrera_id || null; this.ciclo = d.ciclo || 1;
+    this.perfil_id = d.perfil_id; this.institucion_id = d.institucion_id; this.carrera_id = d.carrera_id || null; this.ciclo = d.ciclo || 1; this.grado_id = d.grado_id || null;
     this.notas = (d.notas || []).map(n => ({ id: n.id, curso: n.curso_id, periodo: n.periodo_id, v: Number(n.nota), peso: n.peso || 1,
       titulo: n.titulo || "", comentario: (n.notas_detalle && n.notas_detalle.comentario) || "" })).sort((a, b) => a.id - b.id);
   }
@@ -523,7 +523,7 @@ class Estudiante {
 
 /* ===== Estado ===== */
 let yo = null, permisos = {};
-let est = [], perfiles = [], insts = [], solic = [], invs = [], cursos = [], periodos = [], carreras = [], docCursos = [], inscr = [], activos = [], tareas = [], archivos = [];
+let est = [], perfiles = [], insts = [], solic = [], invs = [], cursos = [], periodos = [], carreras = [], docCursos = [], inscr = [], activos = [], tareas = [], archivos = [], grados = [], docGrados = [], anuncios = [], notifs = [];
 let inscrSet = new Set();   // "estudiante-curso" de cada inscripción, para consultarlas al instante
 let vista = "panel", orden = 0, filtro = "", detalleId = null, borrador = [], kBorr = 0, periodoSel = null;
 let tabLogin = "ingresar", instSel = null, avisoCarga = "", estadoSis = null;
@@ -584,13 +584,14 @@ const perfilDe = id => perfiles.find(p => p.id === id);
 const docentesDe = instId => perfiles.filter(p => p.rol === "docente" && p.institucion_id === instId);
 const instDe = id => insts.find(i => i.id === id);
 
-const SEL_EST = "estudiantes?select=id,codigo,nombre,docente_id,perfil_id,institucion_id,carrera_id,ciclo,notas(id,curso_id,periodo_id,nota,peso,titulo,notas_detalle(comentario))&order=id";
-async function recargarEst() { est = (await sel(SEL_EST)).map(d => new Estudiante(d)); }
+const selEst = () => sel(SEL_EST).catch(() => sel(SEL_EST.replace(",grado_id", "")));   // tolera una base que aún no tiene los grados
+const SEL_EST = "estudiantes?select=id,codigo,nombre,docente_id,perfil_id,institucion_id,carrera_id,ciclo,grado_id,notas(id,curso_id,periodo_id,nota,peso,titulo,notas_detalle(comentario))&order=id";
+async function recargarEst() { est = (await selEst()).map(d => new Estudiante(d)); }
 // Consultas que no dependen del rol (la base ya filtra por cuenta): se lanzan a la vez que mi_sesion al entrar
 const consultasComunes = () => Promise.all([
-  sel(SEL_EST),
+  selEst(),
   sel("perfiles?select=id,usuario,nombres,apellidos,rol,institucion_id,docente_id,permisos,activo&order=creado"),
-  sel("cursos?select=id,institucion_id,nombre,orden,carrera_id,ciclo&order=orden,id"),
+  sel("cursos?select=id,institucion_id,nombre,orden,carrera_id,ciclo,grado_id&order=orden,id").catch(() => sel("cursos?select=id,institucion_id,nombre,orden,carrera_id,ciclo&order=orden,id")),
   sel("periodos?select=id,institucion_id,nombre,orden&order=orden,id"),
   sel("carreras?select=id,institucion_id,nombre,ciclos,orden&order=orden,id"),
   selTodo("inscripciones?select=estudiante_id,curso_id&order=estudiante_id,curso_id"),
@@ -617,7 +618,20 @@ async function cargarDatos(adelantadas) {
   if (periodoSel && !periodos.some(x => x.id === periodoSel)) periodoSel = null;
   est = e.map(d => new Estudiante(d)); perfiles = p; insts = i2; solic = s2; invs = v2;
   recargarTareas().then(() => { if (vista === "tareas") repintarTareas(); }).catch(() => {});
+  recargarExtra().then(() => { if (yo && !dlg.open && ["panel", "grados", "anuncios", "directorio"].includes(vista)) render(); }).catch(() => {});
 }
+// Grados, anuncios y avisos personales (se piden aparte: no retrasan la entrada)
+const SEL_NOTIFS = "notificaciones?select=id,mensaje,leida,creado&order=creado.desc&limit=50";
+async function recargarExtra() {
+  const q = p => sel(p).catch(() => []);
+  const [g, dg, an, no] = await Promise.all([q("grados?select=id,institucion_id,nombre,orden&order=orden,id"), q("docente_grados?select=docente_id,grado_id"),
+    q("anuncios?select=id,institucion_id,titulo,cuerpo,para,creado&order=creado.desc&limit=30"), q(SEL_NOTIFS)]);
+  grados = g; docGrados = dg; anuncios = an; notifs = no; pintarCampana();
+  if (!tNotif) tNotif = setInterval(() => { if (yo) sel(SEL_NOTIFS).then(r => { notifs = r; pintarCampana(); }).catch(() => {}); }, 60000);
+}
+let tNotif = null;
+const sinLeer = () => notifs.filter(n => !n.leida).length;
+function pintarCampana() { const e = $("#campana span"); if (e) e.textContent = sinLeer() ? " " + sinLeer() : ""; }
 async function recargarTodo() { await cargarDatos(); render(); }
 
 async function entrar() {
@@ -793,12 +807,15 @@ function vistasDisponibles() {
   const r = yo.rol, p = permisos, v = [["panel", "▦", "Panel principal"]];
   if (r !== "dueno") v.push(["cursos", "❖", r === "alumno" ? "Mis cursos" : "Cursos"]);
   if (r === "admin" && esUni()) v.push(["carreras", "◈", "Carreras"]);
+  if (r === "admin" && !esUni()) v.push(["grados", "◈", "Grados"]);
+  if (r === "admin") v.push(["anuncios", "✉", "Anuncios"]);
   if (r === "admin" && porCurso()) { v.push(["asignaciones", "☰", "Docentes y cursos"]); v.push(["inscripciones", "✓", "Inscripciones"]); }
   if (r === "alumno") { v.push(["mis", "★", "Mis notas"]); v.push(["tareas", "✐", "Tareas"]); v.push(["comentarios", "✎", "Mis comentarios"]); }
-  else v.push(["lista", "☰", r === "dueno" ? "Estudiantes (lectura)" : "Estudiantes"]);
+  else if (r === "dueno") v.push(["directorio", "☰", "Directorio"]);   // el dueño ve a todos, por institución / carrera / ciclo / curso (o grado)
+  else if (r === "admin") v.push(["lista", "☰", "Estudiantes"]);   // los docentes ven a sus alumnos dentro de cada curso
   if (r === "docente") v.push(["tareas", "✐", "Tareas"]);
   if (esStaff() && p.editar_notas) v.push(["calificar", "✎", "Agregar calificación"]);
-  if (r !== "alumno") v.push(["buscar", "⌕", "Buscar por código"]);
+  if (r === "admin" || r === "dueno") v.push(["buscar", "⌕", "Buscar por código"]);
   if (r === "dueno" || p.ver_estadisticas) v.push(["estadisticas", "◔", "Estadísticas"]);
   if (puedeCursos()) v.push(["config", "▣", tituloConfig()]);
   if (r === "admin") v.push(["correo", "✉", "Correo institucional"]);
@@ -1125,7 +1142,7 @@ function vCarpetas() {
   return `<div class="card"><h2>Carpetas</h2><ul class="tree"><li><details open><summary>📁 <b>Admin</b> <small>${esc(nombreCompleto(yo))}</small></summary><ul>${arbol || "<li><small>Aún no hay instituciones.</small></li>"}</ul></details></li></ul></div>`;
 }
 /* ===== Carreras (universidad): dentro de cada una, sus cursos, alumnos y docentes ===== */
-let carreraSel = null, carTab = "cursos", preInv = null;
+let carreraSel = null, carTab = "cursos", preInv = null, gradoSel = null, graTab = "alumnos";
 const docentesDeCarrera = id => new Set(docCursos.filter(x => (cursoDe(x.curso_id) || {}).carrera_id === id).map(x => x.docente_id));
 function vCarreras() {
   const inst = yo.institucion, cars = carrerasDe(inst.id), car = carreraSel && carreraDe(carreraSel);
@@ -1308,7 +1325,7 @@ async function subirFoto(archivo) {
 function cabecera(conUsuario, menu = "") {
   const sub = yo && yo.institucion ? yo.institucion.nombre : "Propietario";
   return `<header><div class="logo"><i></i>SINEVA</div><div class="sp"></div>
-    <button class="hbtn" data-a="tema" title="Cambiar entre modo claro y oscuro">${temaActual() === "dark" ? "☀<span class=\"txt\"> Modo claro</span>" : "☾<span class=\"txt\"> Modo oscuro</span>"}</button>${menu ? `<div class="menuwrap"><button class="hbtn menubtn" data-a="menu" aria-label="Menú" title="Menú">⋮</button><div class="menupop" id="menuPop">${menu}</div></div>` : ""}
+    <button class="hbtn" data-a="tema" title="Cambiar entre modo claro y oscuro">${temaActual() === "dark" ? "☀<span class=\"txt\"> Modo claro</span>" : "☾<span class=\"txt\"> Modo oscuro</span>"}</button>${conUsuario && yo && yo.acceso ? `<button class="hbtn" id="campana" data-a="campana" title="Avisos">🔔<span>${sinLeer() ? " " + sinLeer() : ""}</span></button>` : ""}${menu ? `<div class="menuwrap"><button class="hbtn menubtn" data-a="menu" aria-label="Menú" title="Menú">⋮</button><div class="menupop" id="menuPop">${menu}</div></div>` : ""}
     ${conUsuario ? `<div class="user">${avatarDe(nombreCompleto(yo), yo.usuario, yo.id)}<div>${esc(nombreCompleto(yo))}<small>${ROL[yo.rol]} · ${esc(sub)}</small></div></div><button class="hbtn" data-a="salir">Salir</button>` : ""}</header>`;
 }
 function pantallaLogin() {
@@ -1352,8 +1369,8 @@ function pantallaApp() {
   if (!vs.some(v => v[0] === vista)) vista = "panel";
   // Menú reducido: las pantallas afines se juntan en una sola entrada y sus partes salen como pestañas arriba del contenido
   const GRUPOS = [
-    { id: "inst", i: "▣", n: "Institución", v: ["carreras", "asignaciones", "inscripciones", "config", "correo"] },
-    { id: "pers", i: "☺", n: "Personas", v: ["lista", "usuarios", "solicitudes", "invitar", "buscar"] },
+    { id: "inst", i: "▣", n: "Institución", v: ["carreras", "grados", "asignaciones", "inscripciones", "config", "anuncios", "correo"] },
+    { id: "pers", i: "☺", n: "Personas", v: ["directorio", "lista", "usuarios", "solicitudes", "invitar", "buscar"] },
     { id: "misn", i: "★", n: "Mis notas", v: ["mis", "comentarios"] },
     { id: "nota", i: "✎", n: "Calificaciones", v: ["calificar", "estadisticas"] },
     { id: "inss", i: "⌂", n: "Instituciones", v: ["instituciones", "carpetas"] },
@@ -1374,7 +1391,8 @@ function pantallaApp() {
   let cuerpo;
   if (avisoCarga) cuerpo = `<div class="card"><h2>No se pudieron cargar los datos</h2><p class="err">${esc(avisoCarga)}</p><button class="btn" data-a="reintentar">Reintentar</button></div>`;
   else cuerpo = { panel: vPanel, mis: vMis, lista: vLista, registrar: vRegistrar, calificar: vCalificar, buscar: vBuscar, estadisticas: vEstadisticas,
-    usuarios: vUsuarios, solicitudes: vSolicitudes, invitar: vInvitar, instituciones: vInstituciones, carpetas: vCarpetas, tareas: vTareas, cuenta: vCuenta, config: vConfig, comentarios: vComentarios, descargar: vDescargar, cursos: vCursos, correo: vCorreo, asignaciones: vAsignaciones, inscripciones: vInscripciones, carreras: vCarreras }[vista]();
+    usuarios: vUsuarios, solicitudes: vSolicitudes, invitar: vInvitar, instituciones: vInstituciones, carpetas: vCarpetas, tareas: vTareas, cuenta: vCuenta, config: vConfig, comentarios: vComentarios, grados: vGrados, anuncios: vAnuncios, directorio: vDirectorio, descargar: vDescargar, cursos: vCursos, correo: vCorreo, asignaciones: vAsignaciones, inscripciones: vInscripciones, carreras: vCarreras }[vista]();
+  if (!avisoCarga && vista === "panel") cuerpo = tarjetaAnuncios() + cuerpo;
   const aviso = yo.rol === "dueno" && yo.mantenimiento ? `<div class="msg warn" style="border-radius:0;text-align:center">⚠ El sistema está en mantenimiento: solo tú puedes usarlo. Reanúdalo en «Instituciones».</div>` : "";
   return `${cabecera(true, nav)}${aviso}<div class="layout"><nav>${nav}</nav><main>${pestanas}<div id="main">${cuerpo}</div></main></div>`;
 }
@@ -1384,6 +1402,7 @@ function render() {
 }
 function irA(v) {
   if (v === "registrar") borrador = []; vista = v; conTransicion(render);
+  if (["grados", "anuncios", "directorio", "panel"].includes(v)) recargarExtra().then(() => { if (vista === v && !dlg.open) render(); }).catch(() => {});
   if (v === "tareas") recargarTareas().then(() => { if (vista === "tareas") repintarTareas(); }).catch(() => {});   // datos frescos al abrir
 }
 
@@ -1547,6 +1566,115 @@ function htmlCurso(c, tab) {
     <div class="tabs" style="max-width:440px;margin-bottom:12px">${pestana("notas", "Notas")}${pestana("tareas", "Tareas")}${pestana("personas", "Personas")}</div>
     ${tab === "personas" ? personasCurso(c) : tab === "tareas" ? tareasTab(c) : (cursoSecciones(c) || `<div class="empty">Aún no hay ${nomPeriodos(yo.institucion.tipo)} configurados.</div>`)}`;
 }
+/* ===== Grados (colegios): el administrador añade alumnos y docentes (y cursos, en secundaria) a cada grado ===== */
+const gradoDe = id => grados.find(g => g.id === id);
+const misGrados = () => yo && yo.institucion ? grados.filter(g => g.institucion_id === yo.institucion.id) : [];
+const tutorDe = g => { const x = docGrados.find(d => d.grado_id === g.id); return x ? perfilDe(x.docente_id) : null; };
+const docentesDeGrado = g => {
+  if (!porCursoInst(g.institucion_id)) { const t = tutorDe(g); return t ? [t] : []; }
+  const ids = new Set(docCursos.filter(x => (cursoDe(x.curso_id) || {}).grado_id === g.id).map(x => x.docente_id));
+  return docentesDe(g.institucion_id).filter(d => ids.has(d.id));
+};
+const nombresDocsCurso = c => docCursos.filter(x => x.curso_id === c.id).map(x => perfilDe(x.docente_id)).filter(Boolean).map(nombreCompleto).join(", ") || "Sin docente";
+async function refrescarGrados() { await cargarDatos(); await recargarExtra(); render(); }
+function vGrados() {
+  const gs = misGrados(), g = gradoSel && gradoDe(gradoSel);
+  if (g) return vGradoDetalle(g);
+  gradoSel = null;
+  const sinGrado = est.filter(e => !e.grado_id).length;
+  const tarjeta = x => `<div class="ccard" data-a="grado-abrir" data-id="${x.id}"><div class="banw">${bannerCurso(2000 + x.id)}</div>
+    <div class="cb"><div class="ct">${esc(x.nombre)}</div><div class="cs">${est.filter(e => e.grado_id === x.id).length} alumno(s)</div><div class="ci">${docentesDeGrado(x).map(d => esc(nombreCompleto(d))).join(", ") || "Sin docente"}${porCurso() ? ` · ${cursos.filter(c => c.grado_id === x.id).length} curso(s)` : ""}</div></div>
+    <div class="cm"><button class="btn sm" data-a="grado-abrir" data-id="${x.id}">Abrir</button></div></div>`;
+  return `<div class="card"><h2>Grados <small>${gs.length}</small></h2>
+    <p style="margin-top:0;color:var(--mute)">Elige un grado para añadir sus <b>alumnos</b>${porCurso() ? ", <b>cursos</b>" : ""} y <b>docentes</b>.${sinGrado ? ` Hay ${sinGrado} alumno(s) sin grado.` : ""}</p>
+    <form class="bar" id="fGrado"><input name="nombre" placeholder="Nuevo grado (p. ej. Aula de 5 años)" maxlength="40" required style="flex:1;min-width:220px"><button class="btn">Agregar grado</button></form><div class="err"></div></div>` +
+    (gs.length ? `<div class="cgrid">${gs.map(tarjeta).join("")}</div>` : `<div class="card"><div class="empty">Aún no hay grados.</div></div>`);
+}
+function vGradoDetalle(g) {
+  const por = porCurso(), tabs = por ? [["alumnos", "Alumnos"], ["cursos", "Cursos"], ["docentes", "Docentes"]] : [["alumnos", "Alumnos"], ["docentes", "Docentes"]];
+  if (!tabs.some(x => x[0] === graTab)) graTab = "alumnos";
+  const cab = `<div class="card"><h2><span><button class="btn sm sec" data-a="grado-volver">← Grados</button> &nbsp;${esc(g.nombre)}</span><button class="btn del" data-a="grado-del" data-id="${g.id}">Quitar grado</button></h2></div>
+    <div class="tabs" style="max-width:520px">${tabs.map(([k, n]) => `<button class="${graTab === k ? "on" : ""}" data-a="gra-tab" data-id="${k}">${n}</button>`).join("")}</div>`;
+  return cab + (graTab === "cursos" ? tabCursosGra(g) : graTab === "docentes" ? tabDocentesGra(g) : tabAlumnosGra(g));
+}
+function tabAlumnosGra(g) {
+  const al = est.filter(e => e.grado_id === g.id), sin = est.filter(e => !e.grado_id);
+  return `<div class="card"><h2>Alumnos de ${esc(g.nombre)} <small>${al.length}</small></h2>
+    <div class="bar"><button class="btn" data-a="gra-reg-alumno">＋ Registrar alumno</button><button class="btn sec" data-a="gra-reg-varios">＋ Registrar varios a la vez</button></div>
+    ${al.length ? `<div class="scroll"><table><thead><tr><th>Alumno</th><th></th></tr></thead><tbody>` + al.map(e => `<tr><td><div class="who">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div>${esc(e.nombre)}<small>${esc(e.codigo)}</small></div></div></td>
+      <td style="text-align:right;white-space:nowrap"><button class="btn sm sec" data-a="ver" data-id="${e.id}">Ver / editar</button> <button class="btn sm sec" data-a="gra-quitar" data-id="${e.id}">Quitar del grado</button></td></tr>`).join("") + `</tbody></table></div>` : `<div class="empty">Aún no hay alumnos en este grado.</div>`}
+    ${sin.length ? `<details class="acc" style="margin-top:14px"><summary><span>Alumnos sin grado</span><small>${sin.length}</small></summary><div class="cuerpo"><div class="chips">${sin.map(e => `<label class="chk"><input type="checkbox" data-selsin="${e.id}">${esc(e.nombre)} <small>${esc(e.codigo)}</small></label>`).join("")}</div>
+      <div class="bar" style="margin-top:10px"><button class="btn" data-a="gra-agregar-alumnos">Añadir los marcados a ${esc(g.nombre)}</button></div></div></details>` : ""}</div>`;
+}
+function tabCursosGra(g) {
+  const mine = ordenCursos(cursos.filter(c => c.grado_id === g.id)), libres = ordenCursos(cursos.filter(c => !c.grado_id));
+  return `<div class="card"><h2>Cursos de ${esc(g.nombre)} <small>${mine.length}</small></h2>
+    <form class="bar" id="fCursoGra"><input name="nombre" placeholder="Nombre del curso nuevo" maxlength="80" required style="flex:1;min-width:220px"><button class="btn">Agregar curso</button></form><div class="err"></div>
+    ${mine.length ? `<div class="scroll"><table><tbody>${mine.map(x => `<tr><td>${esc(x.nombre)}<br><small>${esc(nombresDocsCurso(x))} · ${est.filter(e => inscrito(e.id, x.id)).length} inscrito(s)</small></td>
+      <td style="white-space:nowrap;text-align:right"><button class="btn sm sec" data-a="curso-ren" data-id="${x.id}">Renombrar</button> <button class="btn sm sec" data-a="gra-curso-quitar" data-id="${x.id}">Quitar del grado</button> <button class="btn del" data-a="curso-del" data-id="${x.id}">Borrar</button></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Este grado aún no tiene cursos propios.</div>`}
+    ${libres.length ? `<details class="acc" style="margin-top:14px"><summary><span>Cursos de todos los grados</span><small>${libres.length}</small></summary><div class="cuerpo"><p style="margin-top:0;color:var(--mute)">Estos cursos los llevan todos los alumnos. Marca los que sean solo de ${esc(g.nombre)}.</p><div class="chips">${libres.map(x => `<label class="chk"><input type="checkbox" data-selcur="${x.id}">${esc(x.nombre)}</label>`).join("")}</div>
+      <div class="bar" style="margin-top:10px"><button class="btn" data-a="gra-agregar-cursos">Pasar los marcados a ${esc(g.nombre)}</button></div></div></details>` : ""}</div>`;
+}
+function tabDocentesGra(g) {
+  const docs = docentesDe(yo.institucion.id), reg = `<div class="bar"><button class="btn" data-a="gra-reg-docente">＋ Registrar docente</button></div>`;
+  if (!docs.length) return `<div class="card"><h2>Docentes de ${esc(g.nombre)}</h2><div class="empty">Aún no hay docentes en la institución.</div>${reg}</div>`;
+  if (!porCurso()) {
+    const t = tutorDe(g);
+    return `<div class="card"><h2>Docente de ${esc(g.nombre)}</h2><p style="margin-top:0;color:var(--mute)">En primaria un solo docente (tutor) tiene a todos los alumnos del grado y les dicta todos los cursos.</p>${reg}
+      <div class="bar"><select id="tutorSel" aria-label="Docente del grado"><option value="">Sin docente</option>${docs.map(d => `<option value="${d.id}" ${t && t.id === d.id ? "selected" : ""}>${esc(nombreCompleto(d))}</option>`).join("")}</select><button class="btn" data-a="gra-tutor" data-id="${g.id}">Guardar docente del grado</button></div></div>`;
+  }
+  const mine = ordenCursos(cursos.filter(c => c.grado_id === g.id));
+  if (!mine.length) return `<div class="card"><h2>Docentes de ${esc(g.nombre)}</h2><div class="empty">Primero agrega cursos al grado (pestaña Cursos).</div></div>`;
+  const aqui = new Set(docentesDeGrado(g).map(d => d.id));
+  return `<div class="card"><h2>Docentes de ${esc(g.nombre)} <small>${aqui.size}</small></h2><p style="margin-top:0;color:var(--mute)">Marca los cursos de este grado que dicta cada docente, o asígnale todos de una vez.</p>${reg}
+    ${docs.slice().sort((a, b) => (aqui.has(b.id) ? 1 : 0) - (aqui.has(a.id) ? 1 : 0)).map(d => `<details class="acc" ${aqui.has(d.id) ? "open" : ""}><summary><span>${esc(nombreCompleto(d))}</span><small id="asigN${d.id}">${docCursos.filter(x => x.docente_id === d.id && mine.some(m => m.id === x.curso_id)).length} de ${mine.length} curso(s) de este grado</small></summary><div class="cuerpo">
+      <div class="bar"><button class="btn sm" data-a="gra-doc-todos" data-d="${d.id}" data-g="${g.id}" data-on="1">Asignar todos los cursos</button><button class="btn sm sec" data-a="gra-doc-todos" data-d="${d.id}" data-g="${g.id}" data-on="0">Quitar todos</button></div>
+      <div class="chips">${mine.map(x => `<label class="chk"><input type="checkbox" data-asig="${d.id}|${x.id}" ${docCursos.some(a => a.docente_id === d.id && a.curso_id === x.id) ? "checked" : ""}>${esc(x.nombre)}</label>`).join("")}</div></div></details>`).join("")}</div>`;
+}
+/* ===== Anuncios generales (los publica el administrador; los ven todos en su panel) ===== */
+const PARA = { todos: "Todos", docentes: "Docentes", alumnos: "Alumnos" };
+function tarjetaAnuncios() {
+  const l = anuncios.slice(0, 4); if (!l.length) return "";
+  return `<div class="card"><h2>Anuncios <small>${anuncios.length}</small></h2>${l.map(a => `<div style="padding:8px 0;border-top:1px solid var(--row)"><b>${esc(a.titulo)}</b> <small>${fechaHora(a.creado)}${yo.rol === "admin" || yo.rol === "dueno" ? " · " + PARA[a.para] + (yo.rol === "dueno" && instDe(a.institucion_id) ? " · " + esc(instDe(a.institucion_id).nombre) : "") : ""}</small>${a.cuerpo ? `<div style="white-space:pre-wrap;margin-top:2px">${esc(a.cuerpo)}</div>` : ""}</div>`).join("")}</div>`;
+}
+function vAnuncios() {
+  return `<div class="card"><h2>Nuevo anuncio general</h2><form class="form" id="fAnuncio" style="max-width:640px"><label>Título<input name="titulo" maxlength="120" required></label>
+    <label>Mensaje (opcional)<textarea name="cuerpo" rows="3" maxlength="2000"></textarea></label>
+    <label>Para<select name="para"><option value="todos">Todos (docentes y alumnos)</option><option value="docentes">Solo docentes</option><option value="alumnos">Solo alumnos</option></select></label>
+    <div class="err"></div><button class="btn">Publicar anuncio</button></form></div>
+    <div class="card"><h2>Publicados <small>${anuncios.length}</small></h2>${anuncios.map(a => `<div style="padding:10px 0;border-top:1px solid var(--row);display:flex;gap:10px;justify-content:space-between;align-items:flex-start"><div><b>${esc(a.titulo)}</b> <small>${fechaHora(a.creado)} · ${PARA[a.para]}</small>${a.cuerpo ? `<div style="white-space:pre-wrap">${esc(a.cuerpo)}</div>` : ""}</div><button class="btn del" data-a="anuncio-del" data-id="${a.id}">Quitar</button></div>`).join("") || `<div class="empty">Aún no hay anuncios.</div>`}</div>`;
+}
+/* ===== Directorio del dueño: todas las personas, por institución / carrera / ciclo / curso (universidad) o institución / grado (colegio) ===== */
+function vDirectorio() {
+  if (!insts.length) return `<div class="card"><div class="empty">Aún no hay instituciones.</div></div>`;
+  const alum = es => es.length ? `<div class="chips">${es.map(e => `<span class="note">${esc(e.nombre)} <small>${esc(e.codigo)}</small></span>`).join("")}</div>` : `<small>Sin alumnos.</small>`;
+  const det = (titulo, resumen, cuerpo, abierto) => `<details class="acc" ${abierto ? "open" : ""}><summary><span>${titulo}</span><small>${resumen}</small></summary><div class="cuerpo">${cuerpo}</div></details>`;
+  const h = t => `<div style="font-weight:600;margin:10px 0 4px">${t}</div>`;
+  return insts.map(i => {
+    const pe = est.filter(e => e.institucion_id === i.id), docs = docentesDe(i.id), adm = perfiles.filter(p => p.rol === "admin" && p.institucion_id === i.id);
+    let cuerpo = "";
+    if (i.tipo === "universidad") {
+      cuerpo = carrerasDe(i.id).map(c => {
+        const as = pe.filter(e => e.carrera_id === c.id);
+        const ciclos = [...Array(c.ciclos)].map((_, k) => k + 1).map(n => {
+          const a2 = as.filter(e => e.ciclo === n), cs = ordenCursos(cursos.filter(x => x.carrera_id === c.id && x.ciclo === n)); if (!a2.length && !cs.length) return "";
+          return det(`Ciclo ${n}`, `${cs.length} curso(s) · ${a2.length} alumno(s)`, (cs.length ? h("Cursos y docentes") + cs.map(x => `<div>${esc(x.nombre)} <small>${esc(nombresDocsCurso(x))}</small></div>`).join("") : "") + h("Alumnos") + alum(a2));
+        }).join("");
+        return det(esc(c.nombre), `${as.length} alumno(s) · ${c.ciclos} ciclos`, ciclos || `<small>Sin cursos ni alumnos todavía.</small>`);
+      }).join("");
+      const sin = pe.filter(e => !e.carrera_id); if (sin.length) cuerpo += det("Sin carrera", `${sin.length} alumno(s)`, alum(sin));
+    } else {
+      cuerpo = grados.filter(g => g.institucion_id === i.id).map(g => {
+        const as = pe.filter(e => e.grado_id === g.id), dg = docentesDeGrado(g);
+        return det(esc(g.nombre), `${as.length} alumno(s) · ${dg.length} docente(s)`, h("Docentes") + (dg.length ? `<div class="chips">${dg.map(d => `<span class="tag">${esc(nombreCompleto(d))}</span>`).join("")}</div>` : `<small>Sin docente.</small>`) + h("Alumnos") + alum(as));
+      }).join("");
+      const sin = pe.filter(e => !e.grado_id); if (sin.length) cuerpo += det("Sin grado", `${sin.length} alumno(s)`, alum(sin));
+    }
+    cuerpo += det("Docentes de la institución", `${docs.length}`, docs.length ? `<div class="chips">${docs.map(d => `<span class="tag">${esc(nombreCompleto(d))}</span>`).join("")}</div>` : `<small>Sin docentes.</small>`);
+    if (adm.length) cuerpo += det("Administradores", `${adm.length}`, `<div class="chips">${adm.map(d => `<span class="tag">${esc(nombreCompleto(d))}</span>`).join("")}</div>`);
+    return `<div class="card"><h2>${esc(i.nombre)} <small>${etiquetaTipo(i)} · ${pe.length} alumno(s) · ${docs.length} docente(s)</small></h2>${cuerpo}</div>`;
+  }).join("");
+}
 /* ===== Tareas: el docente crea carpetas con material y los alumnos entregan su trabajo (PDF o Word) ===== */
 const SEL_TAREAS = ["tareas?select=id,curso_id,docente_id,titulo,descripcion,limite,creado&order=creado.desc",
   "tarea_archivos?select=id,curso_id,tarea_id,tipo,estudiante_id,subido_por,nombre,mime,tam,creado&order=creado"];
@@ -1645,6 +1773,44 @@ const acciones = {
   menu() { $("#menuPop").classList.toggle("open"); },
   "curso-menu"(d) { const m = $(`#cm${d.id}`); const abrir = !m.classList.contains("open"); document.querySelectorAll(".cmenu.open").forEach(x => x.classList.remove("open")); if (abrir) m.classList.add("open"); },
   "curso-fav"(d) { const id = idNum(d), f = new Set(favoritos()); f.has(id) ? f.delete(id) : f.add(id); guardarLocal("fav_" + yo.id, JSON.stringify([...f])); render(); },
+  async campana() {
+    const l = notifs.slice(), nuevas = sinLeer();
+    abrirDlg(`<div class="dhead"><div><b>Avisos</b><small>${nuevas ? nuevas + " sin leer" : "Todo al día"}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>` +
+      (l.length ? l.map(n => `<div style="padding:10px 0;border-top:1px solid var(--row);${n.leida ? "opacity:.75" : ""}">${n.leida ? "" : `<span class="chip on" style="padding:1px 8px;font-size:11px;margin-right:6px">Nuevo</span>`}${esc(n.mensaje)}<small style="display:block">${fechaHora(n.creado)}</small></div>`).join("") : `<div class="empty">No tienes avisos.</div>`), { estrecho: true });
+    if (nuevas) { try { await rpc("marcar_notificaciones_leidas"); notifs.forEach(n => { n.leida = true; }); pintarCampana(); } catch {} }
+  },
+  "grado-abrir"(d) { gradoSel = idNum(d); graTab = "alumnos"; conTransicion(render); },
+  "grado-volver"() { gradoSel = null; conTransicion(render); },
+  "gra-tab"(d) { graTab = d.id; conTransicion(render); },
+  async "grado-del"(d) {
+    const g = gradoDe(idNum(d)); if (!g || !confirm(`¿Quitar el grado «${g.nombre}»?`)) return;
+    try { await rpc("eliminar_grado", { p_id: g.id }); gradoSel = null; await refrescarGrados(); toast("Grado eliminado."); } catch (e) { toast(e.message); }
+  },
+  "gra-reg-alumno"() { invModo = "uno"; preInv = { rol: "alumno" }; irA("invitar"); },
+  "gra-reg-varios"() { invModo = "masivo"; masivo = nuevoMasivo({ rol: "alumno" }); irA("invitar"); },
+  "gra-reg-docente"() { invModo = "uno"; preInv = { rol: "docente" }; irA("invitar"); },
+  async "gra-quitar"(d) { try { await rpc("asignar_grado_estudiante", { p_est: idNum(d), p_grado: null }); await refrescarGrados(); toast("Alumno quitado del grado."); } catch (e) { toast(e.message); } },
+  async "gra-agregar-alumnos"() {
+    const ids = [...document.querySelectorAll("[data-selsin]:checked")].map(x => Number(x.dataset.selsin));
+    if (!ids.length) { toast("Marca al menos un alumno."); return; }
+    try { await Promise.all(ids.map(id => rpc("asignar_grado_estudiante", { p_est: id, p_grado: gradoSel }))); await refrescarGrados(); toast(`${ids.length} alumno(s) añadido(s) al grado. Se les avisó.`); } catch (e) { toast(e.message); }
+  },
+  async "gra-agregar-cursos"() {
+    const ids = [...document.querySelectorAll("[data-selcur]:checked")].map(x => Number(x.dataset.selcur));
+    if (!ids.length) { toast("Marca al menos un curso."); return; }
+    try { for (const id of ids) await rpc("asignar_grado_curso", { p_curso: id, p_grado: gradoSel }); await refrescarGrados(); toast(`${ids.length} curso(s) pasado(s) al grado.`); } catch (e) { toast(e.message); }
+  },
+  async "gra-curso-quitar"(d) { try { await rpc("asignar_grado_curso", { p_curso: idNum(d), p_grado: null }); await refrescarGrados(); toast("El curso ahora es de todos los grados."); } catch (e) { toast(e.message); } },
+  async "gra-tutor"(d) {
+    const g = gradoDe(idNum(d)), nuevo = $("#tutorSel").value, actual = tutorDe(g);
+    try {
+      if (nuevo) await rpc("asignar_docente_grado", { p_docente: nuevo, p_grado: g.id, p_asignar: true });
+      else if (actual) await rpc("asignar_docente_grado", { p_docente: actual.id, p_grado: g.id, p_asignar: false });
+      await refrescarGrados(); toast("Docente del grado guardado. Se avisó al docente.");
+    } catch (e) { toast(e.message); }
+  },
+  async "gra-doc-todos"(d) { try { await rpc("asignar_docente_grado", { p_docente: d.d, p_grado: Number(d.g), p_asignar: d.on === "1" }); await refrescarGrados(); toast(d.on === "1" ? "Cursos asignados al docente." : "Cursos quitados al docente."); } catch (e) { toast(e.message); } },
+  async "anuncio-del"(d) { if (!confirm("¿Quitar este anuncio?")) return; try { await rpc("eliminar_anuncio", { p_id: idNum(d) }); await recargarExtra(); render(); toast("Anuncio quitado."); } catch (e) { toast(e.message); } },
   "tarea-abrir"(d) { abrirDlg(htmlTarea(idNum(d))); },
   async "tarea-borrar"(d) {
     if (!confirm("¿Eliminar esta tarea con todo su material y las entregas de los alumnos? No se puede deshacer.")) return;
@@ -1673,7 +1839,7 @@ const acciones = {
     if (d.id !== "personas") return;
     try {   // datos frescos: el docente o los compañeros pudieron agregarse después de abrir la sesión
       const [dc, ins, pe, e] = await Promise.all([sel("docente_cursos?select=docente_id,curso_id"), selTodo("inscripciones?select=estudiante_id,curso_id&order=estudiante_id,curso_id"),
-        sel("perfiles?select=id,usuario,nombres,apellidos,rol,institucion_id,docente_id,permisos,activo&order=creado"), sel(SEL_EST)]);
+        sel("perfiles?select=id,usuario,nombres,apellidos,rol,institucion_id,docente_id,permisos,activo&order=creado"), selEst()]);
       docCursos = dc; inscr = ins; inscrSet = new Set(ins.map(x => x.estudiante_id + "-" + x.curso_id)); perfiles = pe; est = e.map(x => new Estudiante(x));
       const activa = $("#dlgBody .tabs button.on");
       if (dlg.open && activa && activa.dataset.id === "personas") $("#dlgBody").innerHTML = htmlCurso(c, "personas");
@@ -1996,7 +2162,13 @@ document.addEventListener("submit", ev => {
   ev.preventDefault(); const f = ev.target, d = Object.fromEntries(new FormData(f));
   const falla = m => { throw new Error(m); };
   conBoton(f, async err => {
-    if (f.id === "fTarea") {
+    if (f.id === "fGrado") {
+      await rpc("crear_grado", { p_nombre: d.nombre }); await refrescarGrados(); toast("Grado agregado.");
+    } else if (f.id === "fCursoGra") {
+      const id = await rpc("crear_curso", { p_nombre: d.nombre }); await rpc("asignar_grado_curso", { p_curso: id, p_grado: gradoSel }); await refrescarGrados(); toast("Curso agregado al grado.");
+    } else if (f.id === "fAnuncio") {
+      await rpc("crear_anuncio", { p_titulo: d.titulo, p_cuerpo: d.cuerpo || "", p_para: d.para }); await recargarExtra(); render(); toast("Anuncio publicado.");
+    } else if (f.id === "fTarea") {
       await rpc("crear_tarea", { p_curso: Number(d.curso), p_titulo: d.titulo, p_descripcion: d.descripcion || "", p_limite: d.limite ? new Date(d.limite).toISOString() : null });
       await recargarTareas(); repintarTareas(); toast("Carpeta de tarea creada.");
     } else if (f.classList.contains("fSubida")) {

@@ -196,6 +196,51 @@ alter table carreras enable row level security;
 alter table docente_cursos enable row level security;
 alter table inscripciones enable row level security;
 
+-- Grados de un colegio (primaria 1.o a 6.o, secundaria 1.o a 5.o): el administrador asigna alumnos y docentes a cada grado
+create table if not exists grados (
+  id bigint generated always as identity primary key,
+  institucion_id bigint not null references instituciones (id) on delete cascade,
+  nombre text not null check (length(nombre) between 1 and 40),
+  orden smallint not null,
+  unique (institucion_id, orden)
+);
+alter table estudiantes add column if not exists grado_id bigint references grados (id) on delete set null;
+alter table cursos add column if not exists grado_id bigint references grados (id) on delete set null;   -- nulo: curso de todos los grados
+-- Docente (tutor, en primaria) de un grado: uno por grado
+create table if not exists docente_grados (
+  docente_id uuid not null references perfiles (id) on delete cascade,
+  grado_id bigint not null references grados (id) on delete cascade,
+  primary key (docente_id, grado_id)
+);
+create unique index if not exists docente_grados_tutor on docente_grados (grado_id);
+alter table grados enable row level security;
+alter table docente_grados enable row level security;
+
+-- Anuncios generales: solo los publica el administrador
+create table if not exists anuncios (
+  id bigint generated always as identity primary key,
+  institucion_id bigint not null references instituciones (id) on delete cascade,
+  autor uuid references perfiles (id) on delete set null,
+  titulo text not null check (length(titulo) between 1 and 120),
+  cuerpo text not null default '' check (length(cuerpo) <= 2000),
+  para text not null default 'todos' check (para in ('todos', 'docentes', 'alumnos')),
+  creado timestamptz not null default now()
+);
+create index if not exists anuncios_inst on anuncios (institucion_id, creado desc);
+alter table anuncios enable row level security;
+
+-- Avisos personales: lo que el administrador hace con una persona le llega a esa persona
+create table if not exists notificaciones (
+  id bigint generated always as identity primary key,
+  perfil_id uuid not null references perfiles (id) on delete cascade,
+  institucion_id bigint references instituciones (id) on delete cascade,
+  mensaje text not null,
+  leida boolean not null default false,
+  creado timestamptz not null default now()
+);
+create index if not exists notificaciones_perfil on notificaciones (perfil_id, creado desc);
+alter table notificaciones enable row level security;
+
 create or replace function _ciclos_defecto(p_nombre text) returns int language sql immutable as $$ select case when p_nombre ~* 'medicina' then 14 else 10 end $$;
 
 -- Lista de carreras que ya viene cargada (el administrador puede agregar o eliminar)
@@ -227,7 +272,7 @@ begin
     end if;
   elsif v_nivel = 'secundaria' then
     insert into inscripciones (estudiante_id, curso_id)
-      select e.id, c.id from cursos c where c.institucion_id = e.institucion_id
+      select e.id, c.id from cursos c where c.institucion_id = e.institucion_id and (c.grado_id is null or c.grado_id = e.grado_id)
       on conflict do nothing;
   end if;
 end $$;
@@ -247,7 +292,7 @@ begin
     end if;
   elsif v_nivel = 'secundaria' then
     insert into inscripciones (estudiante_id, curso_id)
-      select e.id, c.id from estudiantes e where e.institucion_id = c.institucion_id
+      select e.id, c.id from estudiantes e where e.institucion_id = c.institucion_id and (c.grado_id is null or e.grado_id = c.grado_id)
       on conflict do nothing;
   end if;
 end $$;
@@ -276,6 +321,22 @@ begin
   end loop;
 end $$;
 
+-- Grados de un colegio: primaria 6, secundaria 5 (los que sobren y esten vacios se quitan; los personalizados se conservan)
+create or replace function _sembrar_grados(p_inst bigint) returns void language plpgsql security definer set search_path = public as $$
+declare v_tipo text; v_nivel text; v_n int; i int;
+begin
+  select tipo, nivel into v_tipo, v_nivel from instituciones where id = p_inst;
+  if v_tipo is null then return; end if;
+  v_n := case when v_tipo = 'universidad' then 0 when v_nivel = 'secundaria' then 5 else 6 end;
+  delete from grados g where g.institucion_id = p_inst and g.orden > v_n
+    and not exists (select 1 from estudiantes where grado_id = g.id) and not exists (select 1 from cursos where grado_id = g.id);
+  for i in 1..v_n loop
+    insert into grados (institucion_id, nombre, orden)
+      values (p_inst, case when v_nivel = 'secundaria' then i || chr(176) || ' de secundaria' else i || chr(176) || ' grado' end, i)
+      on conflict do nothing;
+  end loop;
+end $$;
+
 -- Periodos y cursos iniciales de una institucion (solo si aun no tiene)
 create or replace function _sembrar_institucion(p_inst bigint) returns void language plpgsql security definer set search_path = public as $$
 declare v_tipo text;
@@ -286,6 +347,7 @@ begin
   elsif not exists (select 1 from periodos where institucion_id = p_inst) then
     insert into periodos (institucion_id, nombre, orden) values (p_inst, 'Trimestre 1', 1), (p_inst, 'Trimestre 2', 2), (p_inst, 'Trimestre 3', 3);
   end if;
+  perform _sembrar_grados(p_inst);
   if v_tipo = 'universidad' then
     perform _sembrar_carreras(p_inst);
     update instituciones set migrado_cursos = true where id = p_inst and not exists (select 1 from estudiantes where institucion_id = p_inst);   -- institucion nueva: nada que migrar
@@ -623,6 +685,19 @@ drop policy if exists tarea_archivos_sel on tarea_archivos;
 create policy tarea_archivos_sel on tarea_archivos for select to authenticated using (
   (tipo = 'material' and _tarea_visible(curso_id, docente_id))
   or (tipo = 'entrega' and (estudiante_id = _mi_estudiante() or (mi_rol() <> 'alumno' and _tarea_visible(curso_id, docente_id)))));
+
+drop policy if exists grados_sel on grados;
+create policy grados_sel on grados for select to authenticated using (mi_rol() = 'dueno' or institucion_id = mi_inst());
+drop policy if exists docente_grados_sel on docente_grados;
+create policy docente_grados_sel on docente_grados for select to authenticated using (
+  mi_rol() = 'dueno' or exists (select 1 from grados g where g.id = grado_id and g.institucion_id = mi_inst()));
+drop policy if exists anuncios_sel on anuncios;
+create policy anuncios_sel on anuncios for select to authenticated using (
+  mi_rol() = 'dueno'
+  or (institucion_id = mi_inst() and (para = 'todos' or mi_rol() = 'admin'
+       or (para = 'docentes' and mi_rol() = 'docente') or (para = 'alumnos' and mi_rol() = 'alumno'))));
+drop policy if exists notificaciones_sel on notificaciones;
+create policy notificaciones_sel on notificaciones for select to authenticated using (perfil_id = auth.uid());
 
 drop policy if exists pa_sel on periodos_activos;
 create policy pa_sel on periodos_activos for select to authenticated using (
@@ -1073,6 +1148,7 @@ begin
   if p_tipo = 'colegio' then
     update notas set peso = 1 where peso <> 1 and estudiante_id in (select id from estudiantes where institucion_id = p_id);
   end if;
+  perform _sembrar_grados(p_id);
   if _por_curso(p_id) then perform _migrar_a_cursos(p_id); end if;   -- primaria -> secundaria/universidad: nadie pierde acceso
 end $$;
 
@@ -1214,6 +1290,7 @@ begin
     end if;
   end loop;
   update perfiles set permisos = p_permisos where id = p_perfil;
+  perform _notificar(p_perfil, 'actualizó tus permisos de acceso.');
 end $$;
 
 create or replace function actualizar_estado_perfil(p_perfil uuid, p_activo boolean) returns void
@@ -1221,6 +1298,7 @@ language plpgsql security definer set search_path = public as $$
 begin
   if not _alcance_perfil(p_perfil) then raise exception 'No autorizado.'; end if;
   update perfiles set activo = p_activo where id = p_perfil;
+  perform _notificar(p_perfil, case when p_activo then 'reactivó tu cuenta.' else 'desactivó tu cuenta.' end);
 end $$;
 
 create or replace function restablecer_contrasena(p_perfil uuid, p_nueva text) returns void
@@ -1229,6 +1307,7 @@ begin
   if not _alcance_perfil(p_perfil) then raise exception 'No autorizado.'; end if;
   if length(coalesce(p_nueva, '')) < 6 then raise exception 'La contrasena debe tener al menos 6 caracteres.'; end if;
   update auth.users set encrypted_password = crypt(p_nueva, gen_salt('bf')), updated_at = now() where id = p_perfil;
+  perform _notificar(p_perfil, 'restableció tu contraseña.');
 end $$;
 
 -- Solo el dueno: ascender un docente a admin (director) o devolverlo a docente
@@ -1241,6 +1320,7 @@ begin
     raise exception 'Solo se puede cambiar entre docente y admin.';
   end if;
   update perfiles set rol = p_rol::rol_usuario where id = p_perfil;
+  perform _notificar(p_perfil, 'cambió tu rol a ' || case when p_rol = 'admin' then 'administrador.' else 'docente.' end);
 end $$;
 
 create or replace function eliminar_cuenta(p_perfil uuid) returns void
@@ -1295,6 +1375,8 @@ begin
   end if;
   update estudiantes set docente_id = p_docente where id = p_id;
   update perfiles set docente_id = p_docente where id = (select perfil_id from estudiantes where id = p_id);
+  perform _notificar_est(p_id, case when p_docente is null then 'te quitó a tu docente.' else 'te asignó a un nuevo docente.' end);
+  perform _notificar(p_docente, 'te asignó al alumno ' || (select nombre from estudiantes where id = p_id) || '.');
 end $$;
 
 create or replace function eliminar_estudiante(p_id bigint) returns void
@@ -1397,6 +1479,7 @@ begin
   else
     delete from docente_cursos where docente_id = p_docente and curso_id = p_curso;
   end if;
+  perform _notificar(p_docente, case when p_asignar then 'te asignó el curso «' else 'te quitó el curso «' end || (select nombre from cursos where id = p_curso) || '».');
 end $$;
 
 -- Inscribe (o quita) a varios alumnos en un curso; en un curso de carrera solo entran alumnos de esa carrera. Devuelve cuantos cambiaron.
@@ -1417,6 +1500,7 @@ begin
       and estudiante_id in (select id from estudiantes where institucion_id = v_inst);
   end if;
   get diagnostics n = row_count;
+  perform _notificar_est(x, case when p_inscribir then 'te inscribió en el curso «' else 'te quitó del curso «' end || (select nombre from cursos where id = p_curso) || '».') from unnest(p_estudiantes) as x;
   return n;
 end $$;
 
@@ -1438,6 +1522,7 @@ begin
       and curso_id in (select id from cursos where institucion_id = v_inst and carrera_id = v_car and ciclo = p_ciclo);
   end if;
   get diagnostics n = row_count;
+  perform _notificar_est(p_estudiante, case when p_inscribir then 'te inscribió en los cursos del ciclo ' else 'te quitó de los cursos del ciclo ' end || p_ciclo || '.');
   return n;
 end $$;
 
@@ -1457,6 +1542,7 @@ begin
   delete from inscripciones where estudiante_id = p_est
     and curso_id in (select id from cursos where carrera_id is not null and carrera_id <> p_carrera);
   perform _autoinscribir_estudiante(p_est);   -- se suma a los cursos de su ciclo (las inscripciones anteriores se conservan)
+  perform _notificar_est(p_est, 'te asignó a la carrera «' || (select nombre from carreras where id = p_carrera) || '», ciclo ' || v_ciclo || '.');
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -1493,6 +1579,137 @@ begin
     if v_ord < v_max then raise exception 'Solo puedes cerrar el ultimo periodo activo.'; end if;
     delete from periodos_activos where periodo_id = p_periodo and ((v_por and curso_id = p_curso) or (not v_por and docente_id = v_doc));
   end if;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- Avisos: cada cosa que el administrador (o el dueno) hace con una persona le llega a ella
+-- ---------------------------------------------------------------------------
+create or replace function _notificar(p_perfil uuid, p_msg text) returns void language plpgsql security definer set search_path = public as $$
+declare v_quien text; v_inst bigint;
+begin
+  if mi_rol() not in ('admin', 'dueno') or p_perfil is null or p_perfil = auth.uid() then return; end if;
+  select institucion_id into v_inst from perfiles where id = p_perfil;
+  if not found then return; end if;
+  select coalesce(nullif(trim(coalesce(nombres, '') || ' ' || coalesce(apellidos, '')), ''), 'La administración') into v_quien from perfiles where id = auth.uid();
+  insert into notificaciones (perfil_id, institucion_id, mensaje) values (p_perfil, v_inst, 'El administrador ' || v_quien || ' ' || p_msg);
+end $$;
+create or replace function _notificar_est(p_est bigint, p_msg text) returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform _notificar((select perfil_id from estudiantes where id = p_est), p_msg);
+end $$;
+
+create or replace function marcar_notificaciones_leidas() returns void language sql security definer set search_path = public as $$
+  update notificaciones set leida = true where perfil_id = auth.uid() and not leida $$;
+
+-- ---------------------------------------------------------------------------
+-- Grados y anuncios (administrador)
+-- ---------------------------------------------------------------------------
+create or replace function crear_grado(p_nombre text) returns bigint language plpgsql security definer set search_path = public as $$
+declare v_id bigint;
+begin
+  if mi_rol() is distinct from 'admin' or (select tipo from instituciones where id = mi_inst()) = 'universidad' then raise exception 'Los grados son solo para colegios.'; end if;
+  p_nombre := trim(coalesce(p_nombre, ''));
+  if length(p_nombre) < 1 or length(p_nombre) > 40 then raise exception 'Escribe el nombre del grado (maximo 40 letras).'; end if;
+  insert into grados (institucion_id, nombre, orden) values (mi_inst(), p_nombre, coalesce((select max(orden) from grados where institucion_id = mi_inst()), 0) + 1) returning id into v_id;
+  return v_id;
+end $$;
+
+create or replace function eliminar_grado(p_id bigint) returns void language plpgsql security definer set search_path = public as $$
+begin
+  if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
+  if exists (select 1 from estudiantes where grado_id = p_id) then raise exception 'Primero pasa a los alumnos de este grado a otro.'; end if;
+  delete from grados where id = p_id and institucion_id = mi_inst();
+  if not found then raise exception 'Grado no encontrado.'; end if;
+end $$;
+
+-- Asigna un alumno a un grado (p_grado nulo: lo quita). En primaria pasa a tener al docente del grado; en secundaria se inscribe en los cursos del grado.
+create or replace function asignar_grado_estudiante(p_est bigint, p_grado bigint) returns void language plpgsql security definer set search_path = public as $$
+declare v_inst bigint := mi_inst(); v_nom text; v_tutor uuid; v_por boolean := _por_curso(mi_inst());
+begin
+  if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
+  if not exists (select 1 from estudiantes where id = p_est and institucion_id = v_inst) then raise exception 'Estudiante no encontrado.'; end if;
+  if p_grado is not null then
+    select nombre into v_nom from grados where id = p_grado and institucion_id = v_inst;
+    if not found then raise exception 'Grado invalido.'; end if;
+  end if;
+  update estudiantes set grado_id = p_grado where id = p_est;
+  if p_grado is not null and not v_por then
+    select docente_id into v_tutor from docente_grados where grado_id = p_grado;
+    if v_tutor is not null then
+      update estudiantes set docente_id = v_tutor where id = p_est;
+      update perfiles set docente_id = v_tutor where id = (select perfil_id from estudiantes where id = p_est);
+    end if;
+  end if;
+  if v_por then
+    delete from inscripciones where estudiante_id = p_est and curso_id in (select id from cursos where grado_id is not null and grado_id is distinct from p_grado);
+    perform _autoinscribir_estudiante(p_est);
+  end if;
+  perform _notificar_est(p_est, case when p_grado is null then 'te quitó de tu grado.' else 'te asignó al grado «' || v_nom || '».' end);
+end $$;
+
+-- Asigna (o quita) un docente a un grado: en primaria queda como tutor de sus alumnos; en secundaria dicta todos los cursos del grado
+create or replace function asignar_docente_grado(p_docente uuid, p_grado bigint, p_asignar boolean) returns void language plpgsql security definer set search_path = public as $$
+declare v_inst bigint := mi_inst(); v_nom text;
+begin
+  if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
+  if not exists (select 1 from perfiles where id = p_docente and rol = 'docente' and institucion_id = v_inst) then raise exception 'Docente invalido.'; end if;
+  select nombre into v_nom from grados where id = p_grado and institucion_id = v_inst;
+  if not found then raise exception 'Grado invalido.'; end if;
+  if _por_curso(v_inst) then
+    if p_asignar then
+      insert into docente_cursos (docente_id, curso_id) select p_docente, id from cursos where institucion_id = v_inst and grado_id = p_grado on conflict do nothing;
+    else
+      delete from docente_cursos where docente_id = p_docente and curso_id in (select id from cursos where grado_id = p_grado);
+    end if;
+  elsif p_asignar then
+    delete from docente_grados where grado_id = p_grado;
+    insert into docente_grados (docente_id, grado_id) values (p_docente, p_grado);
+    update estudiantes set docente_id = p_docente where grado_id = p_grado;
+    update perfiles set docente_id = p_docente where id in (select perfil_id from estudiantes where grado_id = p_grado and perfil_id is not null);
+  else
+    delete from docente_grados where docente_id = p_docente and grado_id = p_grado;
+  end if;
+  perform _notificar(p_docente, case when p_asignar then 'te asignó al grado «' || v_nom || '».' else 'te quitó del grado «' || v_nom || '».' end);
+end $$;
+
+-- Pone un curso en un grado (p_grado nulo: curso de todos los grados)
+create or replace function asignar_grado_curso(p_curso bigint, p_grado bigint) returns void language plpgsql security definer set search_path = public as $$
+declare v_inst bigint := mi_inst(); v_nom text; v_cur text; r record;
+begin
+  if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
+  select nombre into v_cur from cursos where id = p_curso and institucion_id = v_inst;
+  if not found then raise exception 'Curso invalido.'; end if;
+  if p_grado is not null then
+    select nombre into v_nom from grados where id = p_grado and institucion_id = v_inst;
+    if not found then raise exception 'Grado invalido.'; end if;
+  end if;
+  update cursos set grado_id = p_grado where id = p_curso;
+  if _por_curso(v_inst) then
+    if p_grado is not null then
+      delete from inscripciones where curso_id = p_curso and estudiante_id in (select id from estudiantes where grado_id is distinct from p_grado);
+    end if;
+    perform _autoinscribir_curso(p_curso);
+  end if;
+  for r in select docente_id from docente_cursos where curso_id = p_curso loop
+    perform _notificar(r.docente_id, 'cambió el grado del curso «' || v_cur || '»' || case when p_grado is null then ' (ahora es de todos los grados).' else ' (ahora es de «' || v_nom || '»).' end);
+  end loop;
+end $$;
+
+create or replace function crear_anuncio(p_titulo text, p_cuerpo text default '', p_para text default 'todos') returns bigint language plpgsql security definer set search_path = public as $$
+declare v_id bigint;
+begin
+  if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
+  if p_para not in ('todos', 'docentes', 'alumnos') then raise exception 'Destinatarios invalidos.'; end if;
+  p_titulo := trim(coalesce(p_titulo, ''));
+  if length(p_titulo) < 1 or length(p_titulo) > 120 then raise exception 'Escribe el titulo del anuncio (maximo 120 letras).'; end if;
+  insert into anuncios (institucion_id, autor, titulo, cuerpo, para) values (mi_inst(), auth.uid(), p_titulo, left(coalesce(p_cuerpo, ''), 2000), p_para) returning id into v_id;
+  return v_id;
+end $$;
+
+create or replace function eliminar_anuncio(p_id bigint) returns void language plpgsql security definer set search_path = public as $$
+begin
+  if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
+  delete from anuncios where id = p_id and institucion_id = mi_inst();
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -1682,6 +1899,11 @@ do $$ begin
   end if;
 end $$;
 
+-- Colegios que ya existian: se les crean sus grados
+do $$ declare i record; begin
+  for i in select id from instituciones loop perform _sembrar_grados(i.id); end loop;
+end $$;
+
 -- 11. Permisos de ejecucion: solo lo necesario queda abierto
 -- ---------------------------------------------------------------------------
 do $$
@@ -1695,7 +1917,7 @@ begin
              'cambiar_rol', 'eliminar_cuenta', 'regenerar_codigo', 'eliminar_invitacion', 'registrar_estudiante', 'actualizar_estudiante', 'reasignar_docente',
              'eliminar_estudiante', 'agregar_nota', 'actualizar_nota', 'eliminar_nota',
              'cambiar_tipo_institucion', 'eliminar_institucion', 'crear_invitaciones_masivo', 'actualizar_dominio', 'configurar_correo_institucion', 'quitar_correo_institucion', 'probar_correo', 'actualizar_cuentas_google',
-             'activar_periodo', 'crear_tarea', 'eliminar_tarea', 'subir_archivo', 'eliminar_archivo', 'crear_carrera', 'editar_carrera', 'eliminar_carrera', 'asignar_curso_docente', 'inscribir_estudiantes', 'inscribir_ciclo', 'cambiar_carrera_estudiante', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
+             'activar_periodo', 'marcar_notificaciones_leidas', 'crear_grado', 'eliminar_grado', 'asignar_grado_estudiante', 'asignar_docente_grado', 'asignar_grado_curso', 'crear_anuncio', 'eliminar_anuncio', 'crear_tarea', 'eliminar_tarea', 'subir_archivo', 'eliminar_archivo', 'crear_carrera', 'editar_carrera', 'eliminar_carrera', 'asignar_curso_docente', 'inscribir_estudiantes', 'inscribir_ciclo', 'cambiar_carrera_estudiante', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
              'crear_periodo', 'renombrar_periodo', 'eliminar_periodo', 'actualizar_mi_perfil', 'actualizar_mi_foto'])
   loop
     execute format('revoke all on function %s from public, anon', f);
@@ -1705,7 +1927,7 @@ begin
   for f in select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname = any (array[
              '_generar_usuario', '_crear_invitacion', '_puede_resolver_solicitud', '_puede_invitacion', '_puedo_gestionar', '_alcance_perfil', 'crear_invitacion_dueno',
-             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario', '_enviar_credenciales', 'configurar_correo', '_sembrar_carreras', '_migrar_a_cursos', '_ciclos_defecto', '_puedo_calificar', '_autoinscribir_estudiante', '_autoinscribir_curso'])
+             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario', '_enviar_credenciales', 'configurar_correo', '_sembrar_carreras', '_migrar_a_cursos', '_ciclos_defecto', '_puedo_calificar', '_autoinscribir_estudiante', '_autoinscribir_curso', '_notificar', '_notificar_est', '_sembrar_grados'])
   loop
     execute format('revoke all on function %s from public, anon, authenticated', f);
   end loop;
