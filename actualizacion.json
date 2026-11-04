@@ -1,5 +1,5 @@
 {
-  "requerida": "1.1.0",
+  "requerida": "1.2.0",
   "android": "https://github.com/bell786u-ctrl/sistema_estudiantil/releases/download/app-latest/Estudiantil.apk",
   "pc": "https://github.com/bell786u-ctrl/sistema_estudiantil/releases/download/app-latest/Estudiantil-Setup.exe"
 }
