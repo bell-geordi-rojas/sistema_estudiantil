@@ -243,6 +243,7 @@ create table if not exists eventos_seguridad (
 );
 create index if not exists eventos_seguridad_creado on eventos_seguridad (creado desc);
 alter table eventos_seguridad enable row level security;
+alter table eventos_seguridad add column if not exists rol text;
 -- Contador de peticiones para frenar abusos (por persona o por IP)
 create table if not exists limites (
   clave text not null,
@@ -811,9 +812,9 @@ create or replace function _evento(p_tipo text, p_detalle text default null, p_g
 language plpgsql security definer set search_path = public as $$
 begin
   if random() < 0.01 then delete from eventos_seguridad where creado < now() - interval '180 days'; end if;
-  insert into eventos_seguridad (tipo, gravedad, usuario, perfil_id, institucion_id, detalle, ip)
+  insert into eventos_seguridad (tipo, gravedad, usuario, perfil_id, institucion_id, rol, detalle, ip)
     values (p_tipo, p_gravedad, coalesce(p_usuario, (select usuario from perfiles where id = auth.uid())), auth.uid(),
-            (select institucion_id from perfiles where id = auth.uid()), left(p_detalle, 500), _ip());
+            (select institucion_id from perfiles where id = auth.uid()), (select rol::text from perfiles where id = auth.uid()), left(p_detalle, 500), _ip());
 end $$;
 
 -- Limite de peticiones: si se pasa, la peticion se rechaza; el momento en que se alcanza queda en el registro
@@ -877,7 +878,55 @@ language plpgsql volatile security definer set search_path = public as $$
 begin
   if mi_rol() is null then return; end if;
   if exists (select 1 from eventos_seguridad where tipo = 'login' and perfil_id = auth.uid() and creado > now() - interval '1 minute') then return; end if;
+  -- IP que esa cuenta no habia usado en 60 dias (y la cuenta ya tenia accesos): se avisa; si es administrador, es alerta alta
+  if exists (select 1 from eventos_seguridad where tipo = 'login' and perfil_id = auth.uid())
+     and not exists (select 1 from eventos_seguridad where tipo = 'login' and perfil_id = auth.uid() and ip = _ip() and creado > now() - interval '60 days') then
+    perform _evento('login_ip_nueva', 'Primer acceso desde la IP ' || _ip(), case when mi_rol() in ('admin', 'dueno') then 'alta' else 'aviso' end);
+  end if;
+  -- la misma cuenta usada desde 3 o mas IP distintas en una hora
+  if (select count(*) from (select ip from eventos_seguridad where tipo = 'login' and perfil_id = auth.uid() and creado > now() - interval '1 hour' union select _ip()) x) >= 3 and _ip() <> 'sin-ip'
+     and not exists (select 1 from eventos_seguridad where tipo = 'cuenta_varias_ips' and perfil_id = auth.uid() and creado > now() - interval '1 hour') then
+    perform _evento('cuenta_varias_ips', 'Cuenta usada desde 3 o mas IP distintas en 1 hora', 'alta');
+  end if;
   perform _evento('login', 'Inicio de sesion', 'info');
+end $$;
+
+-- Intentos de usar algo que la cuenta no puede (la pagina los reporta: un uso normal no los provoca). 5 en 10 minutos = alerta alta.
+create or replace function registrar_denegado(p_detalle text) returns void
+language plpgsql volatile security definer set search_path = public as $$
+declare n int;
+begin
+  if mi_rol() is null then return; end if;
+  perform _limitar('denegado:' || auth.uid(), 30, 600);
+  perform _evento('acceso_denegado', left(coalesce(p_detalle, ''), 120), 'aviso');
+  select count(*) into n from eventos_seguridad where tipo = 'acceso_denegado' and perfil_id = auth.uid() and creado > now() - interval '10 minutes';
+  if n = 5 then perform _evento('intentos_no_autorizados', '5 intentos no autorizados en 10 minutos', 'alta'); end if;
+end $$;
+
+-- Operaciones masivas: borrar o cambiar muchas filas de una sola vez deja una alerta (tambien si lo hace un administrador)
+create or replace function _t_borrado_masivo() returns trigger language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  select count(*) into n from viejas;
+  if n >= 25 then perform _evento('borrado_masivo', TG_TABLE_NAME || ': ' || n || ' filas eliminadas en una sola operacion', 'alta'); end if;
+  return null;
+end $$;
+create or replace function _t_notas_masivas() returns trigger language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  select count(*) into n from nuevas;
+  if n >= 25 then perform _evento('calificaciones_masivas', n || ' notas cambiadas en una sola operacion', 'aviso'); end if;
+  return null;
+end $$;
+do $$
+declare t text;
+begin
+  foreach t in array array['notas', 'estudiantes', 'inscripciones', 'perfiles', 'tareas'] loop
+    execute format('drop trigger if exists seg_borrado_masivo on public.%I', t);
+    execute format('create trigger seg_borrado_masivo after delete on public.%I referencing old table as viejas for each statement execute function _t_borrado_masivo()', t);
+  end loop;
+  drop trigger if exists seg_notas_masivas on public.notas;
+  create trigger seg_notas_masivas after update on public.notas referencing new table as nuevas for each statement execute function _t_notas_masivas();
 end $$;
 
 -- Ultimo acceso de cada cuenta (solo el dueño)
@@ -2111,7 +2160,7 @@ begin
              'cambiar_rol', 'eliminar_cuenta', 'regenerar_codigo', 'eliminar_invitacion', 'registrar_estudiante', 'actualizar_estudiante', 'reasignar_docente',
              'eliminar_estudiante', 'agregar_nota', 'actualizar_nota', 'eliminar_nota',
              'cambiar_tipo_institucion', 'eliminar_institucion', 'crear_invitaciones_masivo', 'actualizar_dominio', 'configurar_correo_institucion', 'quitar_correo_institucion', 'probar_correo', 'actualizar_cuentas_google',
-             'activar_periodo', 'registrar_acceso', 'ultimos_accesos', 'marcar_notificaciones_leidas', 'crear_grado', 'eliminar_grado', 'asignar_grado_estudiante', 'asignar_docente_grado', 'asignar_grado_curso', 'crear_anuncio', 'eliminar_anuncio', 'crear_tarea', 'eliminar_tarea', 'subir_archivo', 'eliminar_archivo', 'crear_carrera', 'editar_carrera', 'eliminar_carrera', 'asignar_curso_docente', 'inscribir_estudiantes', 'inscribir_ciclo', 'cambiar_carrera_estudiante', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
+             'activar_periodo', 'registrar_acceso', 'registrar_denegado', 'ultimos_accesos', 'marcar_notificaciones_leidas', 'crear_grado', 'eliminar_grado', 'asignar_grado_estudiante', 'asignar_docente_grado', 'asignar_grado_curso', 'crear_anuncio', 'eliminar_anuncio', 'crear_tarea', 'eliminar_tarea', 'subir_archivo', 'eliminar_archivo', 'crear_carrera', 'editar_carrera', 'eliminar_carrera', 'asignar_curso_docente', 'inscribir_estudiantes', 'inscribir_ciclo', 'cambiar_carrera_estudiante', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
              'crear_periodo', 'renombrar_periodo', 'eliminar_periodo', 'actualizar_mi_perfil', 'actualizar_mi_foto'])
   loop
     execute format('revoke all on function %s from public, anon', f);
@@ -2121,7 +2170,7 @@ begin
   for f in select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname = any (array[
              '_generar_usuario', '_crear_invitacion', '_puede_resolver_solicitud', '_puede_invitacion', '_puedo_gestionar', '_alcance_perfil', 'crear_invitacion_dueno',
-             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario', '_enviar_credenciales', 'configurar_correo', '_sembrar_carreras', '_migrar_a_cursos', '_ciclos_defecto', '_puedo_calificar', '_autoinscribir_estudiante', '_autoinscribir_curso', '_notificar', '_notificar_est', '_notificar_curso', '_sembrar_grados', '_evento', '_limitar'])
+             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario', '_enviar_credenciales', 'configurar_correo', '_sembrar_carreras', '_migrar_a_cursos', '_ciclos_defecto', '_puedo_calificar', '_autoinscribir_estudiante', '_autoinscribir_curso', '_notificar', '_notificar_est', '_notificar_curso', '_sembrar_grados', '_evento', '_limitar', '_t_borrado_masivo', '_t_notas_masivas'])
   loop
     execute format('revoke all on function %s from public, anon, authenticated', f);
   end loop;

@@ -480,7 +480,11 @@ async function http(ruta, { method = "GET", body, headers } = {}, reintento = fa
   if (!r.ok) throw new Error(traducirError(j, r.status));
   return j;
 }
-const rpc = (fn, args = {}) => http(`/rest/v1/rpc/${fn}`, { method: "POST", body: args });
+const rpc = (fn, args = {}) => http(`/rest/v1/rpc/${fn}`, { method: "POST", body: args }).catch(e => {
+  // lo que la cuenta no puede hacer queda en el panel de seguridad del dueño
+  if (fn !== "registrar_denegado" && sesion && /No autorizado|permission denied|row-level security/i.test(e.message || "")) http("/rest/v1/rpc/registrar_denegado", { method: "POST", body: { p_detalle: fn } }).catch(() => {});
+  throw e;
+});
 const sel = q => http(`/rest/v1/${q}`);
 // Trae todas las filas de una consulta grande (Supabase entrega como máximo 1000 por petición)
 async function selTodo(q, tam = 1000) {
@@ -631,7 +635,7 @@ async function cargarDatos(adelantadas) {
   recargarExtra().then(() => { if (yo && !dlg.open && ["panel", "grados", "anuncios", "directorio"].includes(vista)) render(); }).catch(() => {});
 }
 // Grados, anuncios y avisos personales (se piden aparte: no retrasan la entrada)
-const SEL_EVENTOS = "eventos_seguridad?select=id,tipo,gravedad,usuario,detalle,ip,creado&order=creado.desc&limit=300";
+const SEL_EVENTOS = "eventos_seguridad?select=id,tipo,gravedad,usuario,rol,institucion_id,detalle,ip,creado&order=creado.desc&limit=300";
 let eventos = [], accesos = [];
 const altas24 = () => eventos.filter(e => e.gravedad === "alta" && Date.now() - new Date(e.creado) < 864e5).length;
 const SEL_NOTIFS = "notificaciones?select=id,mensaje,leida,creado&order=creado.desc&limit=50";
@@ -1694,18 +1698,21 @@ const EVENTO_TXT = { login_fallido: "Inicio de sesión fallido", login_sospechos
   activacion_bloqueada: "Usuario bloqueado por intentos", cuenta_activada: "Cuenta activada", codigo_regenerado: "Código nuevo generado", contrasena_restablecida: "Contraseña restablecida",
   rol_cambiado: "Rol cambiado", cuenta_reactivada: "Cuenta reactivada", cuenta_desactivada: "Cuenta desactivada", permisos_cambiados: "Permisos cambiados", cuenta_eliminada: "Cuenta eliminada",
   institucion_eliminada: "Institución eliminada", mantenimiento_activado: "Mantenimiento activado", mantenimiento_desactivado: "Mantenimiento desactivado", correo_configurado: "Correo configurado",
-  estudiante_eliminado: "Estudiante eliminado", limite_alcanzado: "Límite de peticiones alcanzado" };
-let segFiltro = "";
+  estudiante_eliminado: "Estudiante eliminado", limite_alcanzado: "Límite de peticiones alcanzado", login_ip_nueva: "Acceso desde una IP nueva", cuenta_varias_ips: "Cuenta usada desde varias IP",
+  acceso_denegado: "Intento no autorizado", intentos_no_autorizados: "Varios intentos no autorizados", borrado_masivo: "Borrado masivo", calificaciones_masivas: "Cambio masivo de notas" };
+let segFiltro = "", segInst = "", segRol = "";
 function vSeguridad() {
   const hoy = eventos.filter(e => Date.now() - new Date(e.creado) < 864e5), n = g => hoy.filter(e => e.gravedad === g).length;
   const fallos = hoy.filter(e => /fallid/.test(e.tipo)).length, bloqueados = [...new Set(eventos.filter(e => e.tipo === "activacion_bloqueada" && Date.now() - new Date(e.creado) < 9e5).map(e => e.usuario))];
-  const lista = eventos.filter(e => !segFiltro || e.gravedad === segFiltro).slice(0, 150);
+  const lista = eventos.filter(e => (!segFiltro || e.gravedad === segFiltro) && (!segInst || String(e.institucion_id) === segInst) && (!segRol || e.rol === segRol)).slice(0, 150);
   const pill = g => `<span class="pill ${g === "alta" ? "no" : g === "aviso" ? "na" : "ok"}" style="min-width:48px">${g === "alta" ? "Alta" : g === "aviso" ? "Aviso" : "Info"}</span>`;
   return `<div class="kpis"><div class="kpi"><span>Eventos (24 h)</span><b>${hoy.length}</b></div><div class="kpi"><span>Alertas altas</span><b style="color:${n("alta") ? "var(--red)" : "inherit"}">${n("alta")}</b></div>
     <div class="kpi"><span>Avisos</span><b>${n("aviso")}</b></div><div class="kpi"><span>Intentos fallidos</span><b>${fallos}</b></div><div class="kpi"><span>Bloqueados ahora</span><b>${bloqueados.length}</b></div></div>
     ${bloqueados.length ? `<p class="msg warn">Usuarios bloqueados 15 minutos por demasiados intentos: <b>${bloqueados.map(esc).join(", ")}</b>.</p>` : ""}
-    <div class="card"><h2>Actividad registrada <select id="segFiltro" aria-label="Filtrar por gravedad"><option value="">Todas</option><option value="alta" ${segFiltro === "alta" ? "selected" : ""}>Solo alertas altas</option><option value="aviso" ${segFiltro === "aviso" ? "selected" : ""}>Avisos</option><option value="info" ${segFiltro === "info" ? "selected" : ""}>Informativos</option></select></h2>
-    ${lista.length ? `<div class="scroll"><table><thead><tr><th>Fecha</th><th></th><th>Evento</th><th>Usuario</th><th>Detalle</th><th>IP</th></tr></thead><tbody>${lista.map(e => `<tr><td style="white-space:nowrap">${fechaHora(e.creado)}</td><td>${pill(e.gravedad)}</td><td>${esc(EVENTO_TXT[e.tipo] || e.tipo)}</td><td>${esc(e.usuario || "—")}</td><td>${esc(e.detalle || "")}</td><td><small>${esc(e.ip || "")}</small></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Sin eventos${segFiltro ? " de este tipo" : " todavía"}.</div>`}</div>
+    <div class="card"><h2>Actividad registrada <select id="segFiltro" aria-label="Filtrar por gravedad"><option value="">Todas</option><option value="alta" ${segFiltro === "alta" ? "selected" : ""}>Solo alertas altas</option><option value="aviso" ${segFiltro === "aviso" ? "selected" : ""}>Avisos</option><option value="info" ${segFiltro === "info" ? "selected" : ""}>Informativos</option></select>
+    <select id="segInst" aria-label="Filtrar por institución"><option value="">Todas las instituciones</option>${insts.map(i => `<option value="${i.id}" ${segInst === String(i.id) ? "selected" : ""}>${esc(i.nombre)}</option>`).join("")}</select>
+    <select id="segRol" aria-label="Filtrar por rol"><option value="">Todos los roles</option>${["admin", "docente", "alumno"].map(r => `<option value="${r}" ${segRol === r ? "selected" : ""}>${ROL[r]}</option>`).join("")}</select></h2>
+    ${lista.length ? `<div class="scroll"><table><thead><tr><th>Fecha</th><th></th><th>Evento</th><th>Usuario</th><th>Rol</th><th>Institución</th><th>Detalle</th><th>IP</th></tr></thead><tbody>${lista.map(e => `<tr><td style="white-space:nowrap">${fechaHora(e.creado)}</td><td>${pill(e.gravedad)}</td><td>${esc(EVENTO_TXT[e.tipo] || e.tipo)}</td><td>${esc(e.usuario || "—")}</td><td>${esc(ROL[e.rol] || e.rol || "—")}</td><td>${esc((instDe(e.institucion_id) || {}).nombre || "—")}</td><td>${esc(e.detalle || "")}</td><td><small>${esc(e.ip || "")}</small></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Sin eventos${segFiltro ? " de este tipo" : " todavía"}.</div>`}</div>
     <div class="card"><h2>Últimos accesos <small>${accesos.length}</small></h2>${accesos.length ? `<div class="scroll"><table><thead><tr><th>Usuario</th><th>Rol</th><th>Institución</th><th>Último acceso</th></tr></thead><tbody>${accesos.map(a => `<tr><td>${esc(a.usuario)}</td><td>${esc(ROL[a.rol] || a.rol)}</td><td>${esc(a.institucion || "—")}</td><td>${a.ultimo_acceso ? fechaHora(a.ultimo_acceso) : "<small>Nunca</small>"}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Sin datos.</div>`}</div>`;
 }
 /* ===== Aviso de almacenamiento (cookies): la página solo guarda lo necesario en el navegador ===== */
@@ -2159,7 +2166,7 @@ document.addEventListener("change", ev => {
   else if (t.id === "invRol" || t.id === "invInst") actualizarFormInvitar();
   else if (t.id === "perSel") { periodoSel = t.value ? Number(t.value) : null; conTransicion(render); if (detalleId) renderDetalle(); }
   else if (t.id === "perCal") repintarCal();
-  else if (t.id === "segFiltro") { segFiltro = t.value; $("#main").innerHTML = vSeguridad(); }
+  else if (t.id === "segFiltro" || t.id === "segInst" || t.id === "segRol") { if (t.id === "segFiltro") segFiltro = t.value; else if (t.id === "segInst") segInst = t.value; else segRol = t.value; $("#main").innerHTML = vSeguridad(); }
   else if (t.id === "instWs") { const dom = $("#instDom"); dom.required = t.value === "si"; if (t.value === "si") dom.focus(); }
   else if (t.id === "mInst" || t.id === "mRol") {
     masivo.texto = $("#masTexto").value; masivo.orden = $("#fMas").orden.value;
