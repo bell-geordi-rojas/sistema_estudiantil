@@ -33,7 +33,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: app/electron/dist/Estudiantil-Setup.exe
+          path: |
+            app/electron/dist/Estudiantil-Setup.exe
+            app/electron/dist/Estudiantil-Setup.exe.blockmap
+            app/electron/dist/latest.yml
 
   android:
     runs-on: ubuntu-latest
@@ -58,6 +61,11 @@ jobs:
           node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('capacitor.config.json'));c.android.appendUserAgent='EstudiantilApp/$V';fs.writeFileSync('capacitor.config.json',JSON.stringify(c,null,2))"
           npm install
           npx cap add android
+          # Plugin propio: descarga la actualización y abre el instalador de Android (la app se actualiza sin pasos manuales)
+          mkdir -p android/app/src/main/java/com/masters/estudiantil
+          cp native/InstaladorPlugin.java native/MainActivity.java android/app/src/main/java/com/masters/estudiantil/
+          sed -i 's#<uses-permission android:name="android.permission.INTERNET" />#&\n    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />#' android/app/src/main/AndroidManifest.xml
+          grep -c REQUEST_INSTALL_PACKAGES android/app/src/main/AndroidManifest.xml
           npx capacitor-assets generate --android --assetPath ../assets --iconBackgroundColor '#ffffff' --iconBackgroundColorDark '#ffffff' --splashBackgroundColor '#ffffff' --splashBackgroundColorDark '#ffffff'
           npx cap sync android
           IFS=. read MA MI PA <<< "$V"
@@ -109,7 +117,7 @@ jobs:
         run: |
           ls -l salida
           gh release view app-latest >/dev/null 2>&1 || gh release create app-latest --title "Programas (última versión)" --notes "Instalador para Windows (Estudiantil-Setup.exe) y APK para Android (Estudiantil.apk). Se actualizan solos al cambiar la carpeta app/."
-          gh release upload app-latest salida/Estudiantil-Setup.exe salida/Estudiantil.apk --clobber
+          gh release upload app-latest salida/Estudiantil-Setup.exe salida/Estudiantil-Setup.exe.blockmap salida/latest.yml salida/Estudiantil.apk --clobber
       - name: Exigir la nueva versión a los programas instalados
         run: |
           V=$(jq -r .version version.json)

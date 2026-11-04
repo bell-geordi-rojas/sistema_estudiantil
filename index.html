@@ -169,8 +169,24 @@ async function comprobarActualizacion() {
   try {
     const r = await fetch("actualizacion.json?t=" + Date.now(), { cache: "no-store" }); if (!r.ok) return;
     const j = await r.json();
-    if (j && j.requerida && cmpVer(VERSION_APP, j.requerida) < 0 && !actualizacion) { actualizacion = j; render(); }
+    if (j && j.requerida && cmpVer(VERSION_APP, j.requerida) < 0 && !actualizacion) { actualizacion = j; render(); if (instaladorNativo()) instalarAndroid(); }
   } catch {}
+}
+// Android (app con el plugin «Instalador», desde la 1.2.0): descarga el APK y abre el instalador del sistema para actualizar encima
+const instaladorNativo = () => { try { return OS_APP === "android" && !!window.Capacitor && window.Capacitor.isPluginAvailable("Instalador"); } catch { return false; } };
+let pluginInstalador = null, instalando = false;
+async function instalarAndroid() {
+  if (instalando || !actualizacion) return; instalando = true;
+  const est = t => { const e = $("#estadoAct"); if (e) e.textContent = t; };
+  try {
+    est("Descargando la actualización…");
+    pluginInstalador = pluginInstalador || window.Capacitor.registerPlugin("Instalador");
+    await pluginInstalador.instalar({ url: actualizacion.android || DESCARGAS.android });
+    est("Pulsa «Actualizar» en la ventana de Android. Si no apareció, usa el botón de abajo.");
+  } catch (e) {
+    const m = (e && e.message) || "";
+    est(m === "permiso" ? "Activa «Permitir desde esta fuente» para Estudiantil y vuelve aquí: la actualización seguirá sola." : "No se pudo descargar la actualización" + (m ? " (" + m + ")" : "") + ". Pulsa el botón para reintentar.");
+  } finally { instalando = false; }
 }
 const PESOS = [1, 2, 3, 4];   // ponderación de una nota (solo universidades); si no se elige vale 1
 const ROL = { dueno: "Dueño", admin: "Administrador", docente: "Docente", alumno: "Alumno" };
@@ -738,10 +754,13 @@ function pantallaActualizar() {
   return `${cabecera(false)}<div class="login"><div class="card"><div class="logo" style="color:var(--teal);margin-bottom:8px"><img src="logo.png" alt="" width="44" height="44" style="border-radius:8px">ESTUDIANTIL</div>
     <h2 style="margin:0 0 8px">Actualización obligatoria</h2>
     <p style="margin:0 0 14px;color:var(--mute)">Hay una versión nueva del programa (<b>${esc(a.requerida)}</b>; tienes la ${esc(VERSION_APP === "0.0.0" ? "anterior" : VERSION_APP)}). Para seguir usando el sistema debes actualizarlo.</p>
-    <a class="btn" href="${esc(a[OS_APP] || DESCARGAS[OS_APP])}" style="display:inline-block;text-decoration:none">⬇ Descargar la actualización</a>
-    <ol style="color:var(--mute);margin:14px 0 0;padding-left:20px;line-height:1.6;font-size:13px">${(pc
-      ? ["Descarga <b>Estudiantil-Setup.exe</b> y cierra este programa antes de instalar.", "Ejecuta el instalador: reemplaza la versión anterior y conserva tus datos.", "Abre <b>Estudiantil</b> de nuevo."]
-      : ["Descarga el archivo <b>Estudiantil.apk</b>.", "Ábrelo e instálalo encima de la versión actual (si Android da error, desinstala la app primero: tus datos están en el servidor y no se pierden).", "Abre <b>Estudiantil</b> de nuevo."]).map(p => `<li>${p}</li>`).join("")}</ol>
+    ${instaladorNativo()
+      ? `<p id="estadoAct" class="msg warn">Preparando la actualización…</p><button class="btn" data-a="instalar-android">⬇ Actualizar ahora</button>`
+      : `<a class="btn" href="${esc(a[OS_APP] || DESCARGAS[OS_APP])}" style="display:inline-block;text-decoration:none">⬇ Descargar la actualización</a>
+    <ol style="color:var(--mute);margin:14px 0 0;padding-left:20px;line-height:1.6;font-size:13px">${(pc && cmpVer(VERSION_APP, "1.2.0") >= 0
+      ? ["El programa se actualiza solo al abrirlo, pero esta vez no pudo (¿sin internet?).", "Ciérralo y ábrelo de nuevo con conexión, o instala el archivo descargado."]
+      : pc ? ["Descarga <b>Estudiantil-Setup.exe</b> y cierra este programa antes de instalar.", "Ejecuta el instalador: reemplaza la versión anterior y conserva tus datos.", "Solo esta vez: desde esta versión el programa se actualiza solo."]
+      : ["Descarga el archivo <b>Estudiantil.apk</b>.", "Ábrelo e instálalo. Si Android da error, desinstala la app primero (tus datos están en el servidor y no se pierden). Solo esta vez: desde esta versión se actualiza sola."]).map(p => `<li>${p}</li>`).join("")}</ol>`}
     <button class="btn sec" data-a="recomprobar-version" style="margin-top:14px">Ya actualicé: comprobar de nuevo</button></div></div>`;
 }
 function pantallaBloqueo() {
@@ -859,6 +878,7 @@ const acciones = {
   async "b-add"(d) { agregarBorrador(Number(d.c)); },
   async "b-rm"(d) { borrador = borrador.filter(n => n.k !== Number(d.k)); repintarCursos(); },
   async recomprobar() { await entrar(); render(); },
+  async "instalar-android"() { await instalarAndroid(); },
   async "recomprobar-version"() { actualizacion = null; await comprobarActualizacion(); if (!actualizacion) { render(); toast("Ya tienes la versión necesaria."); } },
   async "curso-ren"(d) {
     const c = cursoDe(idNum(d)), n = await pedir("Nuevo nombre del curso:", c.nombre); if (n === null) return;
@@ -1095,7 +1115,7 @@ function desdeCSV(texto) {
   cargarEstadoSistema();
   if (EN_APP) {
     await comprobarActualizacion();
-    document.addEventListener("visibilitychange", () => { if (!document.hidden) comprobarActualizacion(); });   // al volver a la app también se comprueba
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) { comprobarActualizacion(); if (actualizacion && instaladorNativo()) instalarAndroid(); } });   // al volver a la app también se comprueba
     if (actualizacion) return;
   }
   if (sesion) {

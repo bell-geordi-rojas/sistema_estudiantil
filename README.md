@@ -37,8 +37,7 @@ El instalador de Windows no tiene firma digital (SmartScreen avisa) y el APK est
 
 1. Sube el número de `version.json` (p. ej. `1.1.0` → `1.2.0`) y haz commit/push (también se puede ejecutar a mano en *Actions → Compilar programas*).
 2. El workflow compila el instalador y el APK con esa versión, los publica en **app-latest** y al final actualiza `actualizacion.json`.
-3. Desde ese momento, cualquier programa instalado con una versión anterior muestra «Actualización obligatoria» (con el enlace de descarga) en vez del login, y lo vuelve a comprobar cada vez que se abre o vuelve a primer plano.
-Los cambios solo de la web (`index.html`) no necesitan versión nueva: los programas ya cargan siempre la web publicada.
+3. Los programas instalados se actualizan solos: **PC** descarga e instala la versión nueva al abrirse (electron-updater, con `latest.yml`) y se reabre sola; **Android** descarga el APK y abre el instalador del sistema (el usuario solo pulsa «Actualizar»; la primera vez debe permitir «instalar apps desconocidas» a Estudiantil). Si una actualización no se pudo hacer, la web muestra «Actualización obligatoria» en vez del login.Los cambios solo de la web (`index.html`) no necesitan versión nueva: los programas ya cargan siempre la web publicada.
 El APK se firma con una clave permanente guardada en los *secrets* de GitHub (`ANDROID_KEYSTORE_B64` y `ANDROID_KEYSTORE_PASS`); hay copia en `Documents\EstudiantilKeystore`. Si se pierde, los usuarios tendrán que desinstalar la app para actualizar.
 
 ## Puesta en marcha (una sola vez)
