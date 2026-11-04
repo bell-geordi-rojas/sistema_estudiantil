@@ -194,6 +194,8 @@ html.vt-pagina main{view-transition-name:contenido}
 .acc[open] summary::after{content:"▴"}
 .acc .cuerpo{padding:0 14px 12px}
 .acc.vacio summary{opacity:.65}
+.chk{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);cursor:pointer;font-weight:400}
+.chk:hover{background:var(--hover)}
 .res{display:grid;gap:6px;margin-top:6px}
 .res button{text-align:left;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:9px 12px;border-radius:8px;font:inherit;cursor:pointer}
 .res button.on{border-color:var(--teal);background:var(--chip-on)}
@@ -471,6 +473,11 @@ async function http(ruta, { method = "GET", body, headers } = {}, reintento = fa
 }
 const rpc = (fn, args = {}) => http(`/rest/v1/rpc/${fn}`, { method: "POST", body: args });
 const sel = q => http(`/rest/v1/${q}`);
+// Trae todas las filas de una consulta grande (Supabase entrega como máximo 1000 por petición)
+async function selTodo(q, tam = 1000) {
+  let todo = [], i = 0;
+  for (;;) { const r = await sel(`${q}&limit=${tam}&offset=${i}`); todo = todo.concat(r); if (r.length < tam || i > 100000) return todo; i += tam; }
+}
 // El usuario puede escribirse como «pgomezj» o como su correo institucional «pgomezj@midominio.edu»: solo cuenta lo anterior a la @
 const usuarioDe = u => String(u).trim().toLowerCase().split("@")[0];
 const emailDe = u => `${usuarioDe(u)}@${EMAIL_DOMINIO}`;   // correo interno con el que se registra en Supabase Auth
@@ -501,7 +508,7 @@ async function activarCuenta(usuario, codigo, clave) {
 class Estudiante {
   constructor(d) {
     this.id = d.id; this.codigo = d.codigo; this.nombre = d.nombre; this.docente_id = d.docente_id;
-    this.perfil_id = d.perfil_id; this.institucion_id = d.institucion_id;
+    this.perfil_id = d.perfil_id; this.institucion_id = d.institucion_id; this.carrera_id = d.carrera_id || null;
     this.notas = (d.notas || []).map(n => ({ id: n.id, curso: n.curso_id, periodo: n.periodo_id, v: Number(n.nota), peso: n.peso || 1,
       titulo: n.titulo || "", comentario: (n.notas_detalle && n.notas_detalle.comentario) || "" })).sort((a, b) => a.id - b.id);
   }
@@ -516,7 +523,8 @@ class Estudiante {
 
 /* ===== Estado ===== */
 let yo = null, permisos = {};
-let est = [], perfiles = [], insts = [], solic = [], invs = [], cursos = [], periodos = [];
+let est = [], perfiles = [], insts = [], solic = [], invs = [], cursos = [], periodos = [], carreras = [], docCursos = [], inscr = [];
+let inscrSet = new Set();   // "estudiante-curso" de cada inscripción, para consultarlas al instante
 let vista = "panel", orden = 0, filtro = "", detalleId = null, borrador = [], kBorr = 0, periodoSel = null;
 let tabLogin = "ingresar", instSel = null, avisoCarga = "", estadoSis = null;
 const esUni = () => !!(yo && yo.institucion && yo.institucion.tipo === "universidad");
@@ -525,7 +533,13 @@ const periodosDe = id => periodos.filter(p => p.institucion_id === id);
 const cursoDe = id => cursos.find(c => c.id === id);
 const periodoDe = id => periodos.find(p => p.id === id);
 const miCursos = () => yo && yo.institucion ? cursosDe(yo.institucion.id) : [];
-const misPeriodos = () => yo && yo.institucion ? periodosDe(yo.institucion.id) : [];
+const misPeriodos = () => {
+  if (!yo || !yo.institucion) return [];
+  const ps = periodosDe(yo.institucion.id);
+  if (yo.rol !== "alumno") return ps;
+  const e = est.find(x => x.perfil_id === yo.id), car = e && carreraDe(e.carrera_id);
+  return car ? ps.filter(p => p.orden <= car.ciclos) : ps;   // el alumno solo ve los ciclos de su carrera
+};
 const nomPeriodos = tipo => tipo === "universidad" ? "ciclos" : "trimestres";   // nombre del periodo según el tipo de institución
 const nomPeriodo = tipo => tipo === "universidad" ? "Ciclo" : "Trimestre";
 const tituloConfig = () => esUni() ? "Administrar cursos" : `Cursos y ${nomPeriodos(yo.institucion.tipo)}`;   // las universidades tienen 14 ciclos fijos
@@ -533,6 +547,18 @@ const tituloConfig = () => esUni() ? "Administrar cursos" : `Cursos y ${nomPerio
 const tituloRegistro = () => yo && yo.rol === "dueno" ? "Registrar" : "Registrar estudiante";
 const tituloFormInv = alumno => yo.rol === "dueno" ? "Registrar" : alumno ? "Registrar estudiante" : "Crear cuenta";
 const puedeCursos = () => !!yo && (yo.rol === "admin" || (yo.rol === "docente" && permisos.gestionar_cursos));
+// Modelo "por curso" (colegio secundaria y universidad): cada docente dicta cursos concretos y cada alumno se inscribe en cursos.
+// En primaria el docente (tutor) dicta todos los cursos de su aula.
+const instDeId = id => (yo && yo.institucion && yo.institucion.id === id) ? yo.institucion : insts.find(x => x.id === id);
+const porCursoInst = id => { const i = instDeId(id); return !!i && (i.tipo === "universidad" || i.nivel === "secundaria"); };
+const porCurso = () => !!yo && !!yo.institucion && porCursoInst(yo.institucion.id);
+const etiquetaTipo = i => i.tipo === "universidad" ? "Universidad" : `Colegio ${i.nivel === "secundaria" ? "secundaria" : "primaria"}`;
+const carrerasDe = id => carreras.filter(c => c.institucion_id === id);
+const carreraDe = id => carreras.find(c => c.id === id);
+const inscrito = (estId, cursoId) => inscrSet.has(estId + "-" + cursoId);
+// Cursos que lleva un alumno: en primaria todos los de la institución; "por curso", aquellos en que está inscrito (o ya tiene notas)
+const cursosDeEst = e => { const cs = cursosDe(e.institucion_id); return porCursoInst(e.institucion_id) ? cs.filter(c => inscrito(e.id, c.id) || e.notas.some(n => n.curso === c.id)) : cs; };
+const etiquetaCurso = c => { const car = c.carrera_id && carreraDe(c.carrera_id); return car ? `${car.nombre} · ${c.ciclo ? "Ciclo " + c.ciclo : "sin ciclo"}` : ""; };
 const esStaff = () => yo && (yo.rol === "admin" || yo.rol === "docente");
 const puedeGestionar = () => yo && (yo.rol === "dueno" || yo.rol === "admin" || (yo.rol === "docente" && permisos.gestionar_alumnos));
 const buscarPorCodigo = c => est.find(e => e.codigo.toUpperCase() === c.trim().toUpperCase()) || null;
@@ -540,14 +566,17 @@ const perfilDe = id => perfiles.find(p => p.id === id);
 const docentesDe = instId => perfiles.filter(p => p.rol === "docente" && p.institucion_id === instId);
 const instDe = id => insts.find(i => i.id === id);
 
-const SEL_EST = "estudiantes?select=id,codigo,nombre,docente_id,perfil_id,institucion_id,notas(id,curso_id,periodo_id,nota,peso,titulo,notas_detalle(comentario))&order=id";
+const SEL_EST = "estudiantes?select=id,codigo,nombre,docente_id,perfil_id,institucion_id,carrera_id,notas(id,curso_id,periodo_id,nota,peso,titulo,notas_detalle(comentario))&order=id";
 async function recargarEst() { est = (await sel(SEL_EST)).map(d => new Estudiante(d)); }
 // Consultas que no dependen del rol (la base ya filtra por cuenta): se lanzan a la vez que mi_sesion al entrar
 const consultasComunes = () => Promise.all([
   sel(SEL_EST),
   sel("perfiles?select=id,usuario,nombres,apellidos,rol,institucion_id,docente_id,permisos,activo&order=creado"),
-  sel("cursos?select=id,institucion_id,nombre,orden&order=orden,id"),
+  sel("cursos?select=id,institucion_id,nombre,orden,carrera_id,ciclo&order=orden,id"),
   sel("periodos?select=id,institucion_id,nombre,orden&order=orden,id"),
+  sel("carreras?select=id,institucion_id,nombre,ciclos,orden&order=orden,id"),
+  selTodo("inscripciones?select=estudiante_id,curso_id&order=estudiante_id,curso_id"),
+  sel("docente_cursos?select=docente_id,curso_id"),
 ]);
 // Consultas que dependen del rol; al entrar se lanzan todas por adelantado (la base solo entrega lo que la cuenta puede ver)
 // y luego se descarta lo que no corresponde al rol, así no hay que esperar a conocer el rol para pedirlas.
@@ -559,13 +588,13 @@ const consultasRol = () => Promise.all([
 async function cargarDatos(adelantadas) {
   const gest = puedeGestionar(), verInst = yo.rol === "dueno" || yo.rol === "admin";
   const sin = [], nada = Promise.resolve([]);
-  const [[e, p, cu, pe], [i, s, v]] = await Promise.all(adelantadas || [
+  const [[e, p, cu, pe, ca, ins, dc], [i, s, v]] = await Promise.all(adelantadas || [
     consultasComunes(),
     Promise.all([verInst ? sel("instituciones?select=*&order=nombre") : nada, gest ? sel("solicitudes?select=*&estado=eq.pendiente&order=creado") : nada,
       gest ? sel("invitaciones?select=id,rol,nombres,apellidos,usuario,institucion_id,docente_id,correo,creado&usado=eq.false&order=creado.desc") : nada]),
   ]);
   const i2 = verInst ? i : sin, s2 = gest ? s : sin, v2 = gest ? v : sin;
-  cursos = cu; periodos = pe;
+  cursos = cu; periodos = pe; carreras = ca; inscr = ins; docCursos = dc; inscrSet = new Set(ins.map(x => x.estudiante_id + "-" + x.curso_id));
   if (periodoSel && !periodos.some(x => x.id === periodoSel)) periodoSel = null;
   est = e.map(d => new Estudiante(d)); perfiles = p; insts = i2; solic = s2; invs = v2;
 }
@@ -591,7 +620,7 @@ async function cargarFotos() {
 }
 function salir() {
   if (sesion) fetch(`${SUPABASE_URL}/auth/v1/logout`, { method: "POST", headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${sesion.access_token}` } }).catch(() => {});
-  cerrarSesionLocal(); yo = null; permisos = {}; est = []; perfiles = []; insts = []; solic = []; invs = []; cursos = []; periodos = []; fotos = {}; periodoSel = null; tabLogin = "ingresar"; conTransicion(render);
+  cerrarSesionLocal(); yo = null; permisos = {}; est = []; perfiles = []; insts = []; solic = []; invs = []; cursos = []; periodos = []; carreras = []; docCursos = []; inscr = []; inscrSet = new Set(); fotos = {}; periodoSel = null; tabLogin = "ingresar"; conTransicion(render);
   cargarEstadoSistema();
 }
 async function cargarEstadoSistema() {
@@ -640,12 +669,12 @@ function filas(lista, { acciones = true, soloNombres = false } = {}) {
   if (!lista.length) return `<div class="empty">No hay estudiantes para mostrar.</div>`;
   const verInst = yo.rol === "dueno", verDoc = yo.rol === "admin" || yo.rol === "dueno";
   const puedeBorrar = esStaff() && permisos.eliminar, puedeEditar = esStaff();
-  const cols = yo.rol === "dueno" ? [] : miCursos();   // el dueño ve varias instituciones: sin columnas por curso
+  const cols = yo.rol === "dueno" || miCursos().length > 8 ? [] : miCursos();   // el dueño ve varias instituciones; con muchos cursos no caben columnas
   return `<div class="scroll"><table><thead><tr><th>Estudiante</th>${verInst ? "<th>Institución</th>" : ""}${verDoc ? "<th>Docente</th>" : ""}` +
     (soloNombres ? "" : `<th>Notas</th>${cols.map(c => `<th title="${esc(c.nombre)}">${esc(abrevCurso(c.nombre))}</th>`).join("")}<th>${esUni() ? "Prom. ponderado" : "Promedio"}</th><th>Estado</th>`) +
     `${acciones ? "<th></th>" : ""}</tr></thead><tbody>` +
     lista.map(e => { const d = perfilDe(e.docente_id), i = instDe(e.institucion_id);
-      return `<tr><td><div class="who">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div>${esc(e.nombre)}<small>${esc(e.codigo)}</small></div></div></td>
+      return `<tr><td><div class="who">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div>${esc(e.nombre)}<small>${esc(e.codigo)}${carreraDe(e.carrera_id) ? " · " + esc(carreraDe(e.carrera_id).nombre) : ""}</small></div></div></td>
       ${verInst ? `<td>${i ? esc(i.nombre) : "—"}</td>` : ""}${verDoc ? `<td>${d ? esc(nombreCompleto(d)) : "<small>Sin docente</small>"}</td>` : ""}` +
       (soloNombres ? "" : `<td>${e.totalNotas()}</td>${cols.map(c => `<td>${e.deCurso(c.id).length ? fmt(e.promedioCurso(c.id)) : "<small>–</small>"}</td>`).join("")}
       <td><b>${fmt(e.promedio())}</b></td><td>${pill(e)}</td>`) +
@@ -681,7 +710,7 @@ function resumenPeriodos(e) {
   return `<div class="chips" style="margin-top:10px">${ps.map(p => `<span class="chip ${p.id === periodoSel ? "on" : ""}">${esc(p.nombre)}: <b>${e.totalNotas(p.id) ? fmt(e.promedio(p.id)) : "–"}</b></span>`).join("")}</div>`;
 }
 function detalleTabla(e) {
-  const cs = cursosDe(e.institucion_id);
+  const cs = cursosDeEst(e);
   return `<div class="scroll"><table><thead><tr><th>Curso</th><th>Calificaciones</th><th>${esUni() ? "Prom. ponderado" : "Promedio"}</th></tr></thead><tbody>` +
     (cs.map(c => { const v = e.deCurso(c.id); return `<tr><td>${esc(c.nombre)}</td><td>${v.length ? v.map(n => notaChip(n)).join("") : "<small>(sin notas)</small>"}</td><td>${v.length ? `<b>${fmt(mediaPond(v))}</b>` : "–"}</td></tr>`; }).join("")
       || `<tr><td colspan="3"><small>Aún no hay cursos.</small></td></tr>`) + `</tbody></table></div>${resumenPeriodos(e)}`;
@@ -714,8 +743,9 @@ let calEstId = null;
 const calEstudiante = () => { const i = $("#calCodigo"); return i && i.value.trim() ? buscarPorCodigo(i.value) : null; };
 function calPeriodo() { const s = $("#perCal"); return s ? Number(s.value) : 0; }
 function cursosCalHTML() {
-  const cs = miCursos(), e = calEstudiante(), per = calPeriodo();
-  if (!cs.length) return `<div class="empty">Aún no hay cursos. Agrégalos en «${tituloConfig()}».</div>`;
+  const e = calEstudiante(), per = calPeriodo(); let cs = miCursos();
+  if (e && porCurso()) cs = cs.filter(c => inscrito(e.id, c.id));   // solo los cursos en que el alumno está inscrito (y que el docente dicta)
+  if (!cs.length) return e && porCurso() ? `<div class="empty">Este alumno no está inscrito en ninguno de tus cursos.</div>` : `<div class="empty">Aún no hay cursos. Agrégalos en «${tituloConfig()}».</div>`;
   return cs.map(c => { const ns = e ? e.deCurso(c.id, per) : [];
     return tarjetaCurso(c, ns.map(n => notaChip(n, "", false)).join(""), ns.length ? "prom. " + fmt(mediaPond(ns)) : "sin notas", "c-add"); }).join("");
 }
@@ -742,6 +772,7 @@ async function agregarCal(c) {
 function vistasDisponibles() {
   const r = yo.rol, p = permisos, v = [["panel", "▦", "Panel principal"]];
   if (r !== "dueno") v.push(["cursos", "❖", r === "alumno" ? "Mis cursos" : "Cursos"]);
+  if (r === "admin" && porCurso()) { v.push(["asignaciones", "☰", "Docentes y cursos"]); v.push(["inscripciones", "✓", "Inscripciones"]); }
   if (r === "alumno") { v.push(["mis", "★", "Mis notas"]); v.push(["comentarios", "✎", "Mis comentarios"]); if (p.ver_companeros) v.push(["lista", "☰", "Mis compañeros"]); }
   else v.push(["lista", "☰", r === "dueno" ? "Estudiantes (lectura)" : "Estudiantes"]);
   if (esStaff() && p.editar_notas) v.push(["calificar", "✎", "Agregar calificación"]);
@@ -749,7 +780,7 @@ function vistasDisponibles() {
   if (r === "dueno" || p.ver_estadisticas) v.push(["estadisticas", "◔", "Estadísticas"]);
   if (puedeCursos()) v.push(["config", "▣", tituloConfig()]);
   if (r === "admin") v.push(["correo", "✉", "Correo institucional"]);
-  if (puedeGestionar()) { v.push(["usuarios", "☺", "Cuentas y permisos"]); v.push(["solicitudes", "✉", "Solicitudes"]); v.push(["invitar", "＋", tituloRegistro()]); }
+  if (puedeGestionar() && !(r === "docente" && porCurso())) { v.push(["usuarios", "☺", "Cuentas y permisos"]); v.push(["solicitudes", "✉", "Solicitudes"]); v.push(["invitar", "＋", tituloRegistro()]); }
   if (r === "dueno") { v.push(["instituciones", "⌂", "Instituciones"]); v.push(["carpetas", "▤", "Carpetas"]); }
   v.push(["cuenta", "⚙", "Mi cuenta"]);
   if (!EN_APP) v.push(["descargar", "⬇", "Descargar sistema"]);
@@ -775,7 +806,7 @@ function vMis() {
   const e = est.find(x => x.perfil_id === yo.id);
   if (!e) return `<div class="card"><h2>Mis notas</h2><div class="empty">Tu cuenta aún no tiene un registro de notas asociado.</div></div>`;
   const doc = perfilDe(yo.docente_id);
-  return `<div class="bar"><span class="chip on">${esc(yo.institucion.nombre)}</span>${doc ? `<span class="chip">Docente: ${esc(nombreCompleto(doc))}</span>` : ""}${selPeriodo()}</div>
+  return `<div class="bar"><span class="chip on">${esc(yo.institucion.nombre)}</span>${doc ? `<span class="chip">Docente: ${esc(nombreCompleto(doc))}</span>` : ""}${carreraDe(e.carrera_id) ? `<span class="chip">${esc(carreraDe(e.carrera_id).nombre)}</span>` : ""}${selPeriodo()}</div>
     <div class="kpis"><div class="kpi"><span>${esUni() ? "Promedio ponderado" : "Promedio general"}</span><b>${e.totalNotas() ? fmt(e.promedio()) : "—"}</b></div>
     <div class="kpi"><span>Notas registradas</span><b>${e.totalNotas()}</b></div><div class="kpi"><span>Estado</span><b style="font-size:20px">${pill(e)}</b></div></div>
     <div class="card"><h2>Mis calificaciones por curso</h2>${detalleTabla(e)}</div>`;
@@ -812,10 +843,11 @@ function tarjetaCursoVista(c, favs) {
   let info;
   if (yo.rol === "alumno") { const e = est.find(x => x.perfil_id === yo.id), ns = e ? e.deCurso(c.id) : []; info = ns.length ? `Promedio <b>${fmt(mediaPond(ns))}</b> · ${ns.length} nota(s)` : "Sin notas aún"; }
   else { const con = est.filter(e => e.deCurso(c.id).length); info = con.length ? `${con.length} estudiante(s) · prom. <b>${fmt(media(con.map(e => e.promedioCurso(c.id))))}</b>` : "Sin notas aún"; }
+  if (yo.rol !== "alumno" && porCurso()) info = est.filter(x => inscrito(x.id, c.id)).length + " inscrito(s) · " + info;
   const sub = periodoSel ? periodoDe(periodoSel).nombre : `Todos los ${nomPeriodos(yo.institucion.tipo)}`, fav = favs.has(c.id);
   return `<div class="ccard" data-a="curso-ver" data-id="${c.id}"><div class="banw">${bannerCurso(c.id)}</div>
     <button class="cstar ${fav ? "on" : ""}" data-a="curso-fav" data-id="${c.id}" title="${fav ? "Quitar de favoritos" : "Marcar como favorito"}">${fav ? "★" : "☆"}</button>
-    <div class="cb"><div class="ct">${esc(c.nombre)}</div><div class="cs">${esc(sub)}</div><div class="ci">${info}</div></div>
+    <div class="cb"><div class="ct">${esc(c.nombre)}</div><div class="cs">${esc(sub)}</div>${etiquetaCurso(c) ? `<div class="ci">${esc(etiquetaCurso(c))}</div>` : ""}<div class="ci">${info}</div></div>
     <div class="cm"><button class="mini" data-a="curso-menu" data-id="${c.id}" title="Opciones" aria-label="Opciones del curso">⋮</button>
       <div class="cmenu" id="cm${c.id}"><button data-a="curso-ver" data-id="${c.id}">${yo.rol === "alumno" ? "Ver mis notas" : "Ver estudiantes"}</button>${puedeCursos() ? `<button data-a="curso-ren" data-id="${c.id}">Renombrar</button><button data-a="curso-del" data-id="${c.id}">Quitar</button>` : ""}</div></div></div>`;
 }
@@ -898,17 +930,18 @@ function vUsuarios() {
 }
 function vSolicitudes() {
   if (!solic.length) return `<div class="card"><h2>Solicitudes de afiliación</h2><div class="empty">No hay solicitudes pendientes.</div></div>`;
-  return `<div class="card"><h2>Solicitudes de afiliación</h2><div class="scroll"><table><thead><tr><th>Nombre</th><th>Pide ser</th>${yo.rol === "dueno" ? "<th>Institución</th>" : ""}<th>Fecha</th><th>Docente (alumnos)</th><th></th></tr></thead><tbody>` +
-    solic.map(s => { const i = instDe(s.institucion_id), docs = docentesDe(s.institucion_id);
-      const selDoc = s.rol_solicitado === "alumno" && yo.rol !== "docente"
-        ? `<select id="doc${s.id}">${docs.map(d => `<option value="${d.id}">${esc(nombreCompleto(d))}</option>`).join("") || "<option value=''>(crea un docente primero)</option>"}</select>` : "<small>—</small>";
+  return `<div class="card"><h2>Solicitudes de afiliación</h2><div class="scroll"><table><thead><tr><th>Nombre</th><th>Pide ser</th>${yo.rol === "dueno" ? "<th>Institución</th>" : ""}<th>Fecha</th><th>Docente o carrera (alumnos)</th><th></th></tr></thead><tbody>` +
+    solic.map(s => { const i = instDe(s.institucion_id), docs = docentesDe(s.institucion_id), pc = porCursoInst(s.institucion_id), uni = !!i && i.tipo === "universidad";
+      const selDoc = s.rol_solicitado !== "alumno" || yo.rol === "docente" ? "<small>—</small>"
+        : pc ? (uni ? `<select id="car${s.id}"><option value="">Elige la carrera</option>${carrerasDe(s.institucion_id).map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join("")}</select>` : "<small>Se inscribe en cursos después</small>")
+        : `<select id="doc${s.id}">${docs.map(d => `<option value="${d.id}">${esc(nombreCompleto(d))}</option>`).join("") || "<option value=''>(crea un docente primero)</option>"}</select>`;
       return `<tr><td>${esc(nombreCompleto(s))}</td><td><span class="tag">${ROL[s.rol_solicitado]}</span></td>${yo.rol === "dueno" ? `<td>${i ? esc(i.nombre) : "—"}</td>` : ""}
       <td>${new Date(s.creado).toLocaleDateString("es-PE")}</td><td>${selDoc}</td>
       <td style="white-space:nowrap"><button class="btn sm" data-a="aprobar" data-id="${s.id}">Aprobar</button> <button class="btn del" data-a="rechazar" data-id="${s.id}">Rechazar</button></td></tr>`; }).join("") + `</tbody></table></div></div>`;
 }
 /* ===== Registro de varias cuentas a la vez (nombre completo + correo personal por línea) ===== */
 let invModo = "uno";   // "uno" | "masivo"
-const nuevoMasivo = (ant = {}) => ({ inst: ant.inst || null, rol: ant.rol || "alumno", docente: ant.docente || "", orden: ant.orden || "nombres", texto: "", filas: null, resultados: null });
+const nuevoMasivo = (ant = {}) => ({ inst: ant.inst || null, rol: ant.rol || "alumno", docente: ant.docente || "", orden: ant.orden || "nombres", carrera: ant.carrera || "", texto: "", filas: null, resultados: null });
 let masivo = nuevoMasivo();
 const PARTICULAS = new Set(["de", "del", "la", "las", "los", "y", "san", "santa", "da", "di", "van", "von"]);
 const sinTildes = s => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -949,7 +982,7 @@ const instMasivo = () => yo.rol === "dueno" ? Number(masivo.inst || (insts[0] &&
 function vMasivo() {
   if (masivo.resultados) return resultadosMasivo();
   const rolesOpc = yo.rol === "dueno" ? ["admin", "docente", "alumno"] : yo.rol === "admin" ? ["docente", "alumno"] : ["alumno"];
-  const instId = instMasivo(), docs = yo.rol === "docente" ? [] : docentesDe(instId), dom = dominioDe(instId);
+  const instId = instMasivo(), docs = yo.rol === "docente" ? [] : docentesDe(instId), dom = dominioDe(instId), pcM = porCursoInst(instId), uniM = (instDeId(instId) || {}).tipo === "universidad";
   const avisoDom = dom ? `<p class="msg">Correo institucional: <b>usuario@${esc(dom)}</b>, por ejemplo <b>pgomezj@${esc(dom)}</b> para «Juan Carlos Pérez Gómez».</p>`
     : `<p class="msg warn">Esta institución aún no tiene dominio de correo institucional, así que los usuarios se generan sin él (inicial + apellido). Defínelo en ${yo.rol === "dueno" ? "«Instituciones»" : "«Cursos y trimestres»/«Administrar cursos»"}.</p>`;
   const avisoCorreo = !yo.correo ? `<p class="msg warn">El envío de correos aún no está conectado: las cuentas se crearán igual y podrás descargar un CSV con las credenciales.${yo.rol === "admin" ? " Conéctalo en «Correo institucional»." : yo.rol === "dueno" ? " Configura el correo del sistema (ver README, «Conecta el envío de correos»)." : ""}</p>`
@@ -959,7 +992,8 @@ function vMasivo() {
     <form class="form wide" id="fMas">
     <div class="row2">${yo.rol === "dueno" ? `<label>Institución<select name="inst" id="mInst">${insts.map(i => `<option value="${i.id}" ${i.id === instId ? "selected" : ""}>${esc(i.nombre)}</option>`).join("")}</select></label>` : ""}
     <label>Rol<select name="rol" id="mRol">${rolesOpc.map(r => `<option value="${r}" ${masivo.rol === r ? "selected" : ""}>${ROL[r]}</option>`).join("")}</select></label></div>
-    ${yo.rol === "docente" ? "" : `<label id="mDocWrap" style="${masivo.rol === "alumno" ? "" : "display:none"}">Docente de estos alumnos<select name="docente" id="mDoc">${docs.map(d => `<option value="${d.id}" ${d.id === masivo.docente ? "selected" : ""}>${esc(nombreCompleto(d))}</option>`).join("") || "<option value=''>(no hay docentes)</option>"}</select></label>`}
+    ${masivo.rol === "alumno" && uniM ? `<label>Carrera de estos alumnos<select name="carrera" id="mCar"><option value="">Elige la carrera</option>${carrerasDe(instId).map(c => `<option value="${c.id}" ${String(c.id) === String(masivo.carrera) ? "selected" : ""}>${esc(c.nombre)} (${c.ciclos} ciclos)</option>`).join("")}</select></label>` : ""}
+    ${yo.rol === "docente" || pcM ? "" : `<label id="mDocWrap" style="${masivo.rol === "alumno" ? "" : "display:none"}">Docente de estos alumnos<select name="docente" id="mDoc">${docs.map(d => `<option value="${d.id}" ${d.id === masivo.docente ? "selected" : ""}>${esc(nombreCompleto(d))}</option>`).join("") || "<option value=''>(no hay docentes)</option>"}</select></label>`}
     <label>Cómo vienen escritos los nombres<select name="orden"><option value="nombres" ${masivo.orden === "nombres" ? "selected" : ""}>Nombres y luego apellidos (Juan Carlos Pérez Gómez)</option><option value="apellidos" ${masivo.orden === "apellidos" ? "selected" : ""}>Apellidos y luego nombres (Pérez Gómez Juan Carlos)</option></select></label>
     <label>Lista (máx. 300 personas)<textarea name="texto" id="masTexto" rows="9" placeholder="Juan Carlos Pérez Gómez, juan.perez@gmail.com&#10;Ana María Torres Ruiz, ana.torres@gmail.com" spellcheck="false">${esc(masivo.texto)}</textarea></label>
     <div class="bar"><button type="button" class="btn sec" data-a="mas-archivo">📎 Cargar un archivo CSV o TXT</button></div>
@@ -998,6 +1032,7 @@ function vInvitar(pre = {}) {
     <label>Rol<select name="rol" id="invRol">${rolesOpc.map(r => `<option value="${r}" ${(pre.rol || "alumno") === r ? "selected" : ""}>${ROL[r]}</option>`).join("")}</select></label>
     <div class="row2"><label>Nombres<input name="nombres" required></label><label>Apellidos<input name="apellidos"></label></div>
     <label>Correo personal (opcional: ahí se envían las credenciales)<input type="email" name="correo" autocomplete="off" placeholder="nombre@gmail.com"></label>
+    <label id="invCarWrap" style="display:none">Carrera<select name="carrera"><option value="">Elige la carrera</option></select></label>
     ${yo.rol === "docente" ? "" : `<label id="invDocWrap">Docente (para alumnos)<select name="docente">${docs.map(d => `<option value="${d.id}">${esc(nombreCompleto(d))}</option>`).join("") || "<option value=''>(no hay docentes)</option>"}</select></label>`}
     <div class="err" id="err"></div><div><button class="btn">${yo.rol === "dueno" || !pre.rol || pre.rol === "alumno" ? "Registrar" : "Crear cuenta"}</button></div></form></div>`;
 }
@@ -1017,37 +1052,44 @@ function vInstituciones() {
       <input name="nombre" placeholder="Nombre (p. ej. María Auxiliadora)" required style="flex:1;min-width:220px">
       <input name="dominio" id="instDom" placeholder="Dominio de correo (ej. midominio.edu)" style="min-width:210px" autocapitalize="none">
       <select name="workspace" id="instWs" title="Google Workspace de la institución"><option value="no">Sin Google Workspace (cuentas solo del sistema)</option><option value="si">Ya tiene Google Workspace (dominio obligatorio)</option></select>
-      <select name="tipo" title="Tipo de institución"><option value="colegio">Colegio (trimestres)</option><option value="universidad">Universidad (ciclos y notas con peso)</option></select>
+      <select name="tipo" title="Tipo de institución"><option value="primaria">Colegio primaria (un docente dicta todos los cursos de su aula)</option><option value="secundaria">Colegio secundaria (docentes por curso e inscripciones)</option><option value="universidad">Universidad (carreras, ciclos, notas con peso)</option></select>
       <label style="display:flex;gap:6px;align-items:center">Vence <input type="date" name="vence"></label><button class="btn">Crear</button></form><div class="err"></div>
       <p style="margin:10px 0 0;color:var(--mute);font-size:13px">Google no permite crear un Google Workspace nuevo desde otra aplicación (solo lo contrata la propia institución, con su dominio; las instituciones educativas elegibles pueden pedir <i>Google Workspace for Education</i>, gratuito). Si ya lo tiene, elige «Ya tiene Google Workspace» y escribe su dominio: el administrador de la institución lo conecta después en «Correo institucional» y activa la creación de cuentas reales.</p></div>` : "";
   const tabla = insts.length ? `<div class="scroll"><table><thead><tr><th>Institución</th><th>Tipo</th><th>Correo institucional</th><th>Google</th><th>Carpeta</th><th>Docentes</th><th>Estudiantes</th><th>Vence</th><th>Estado</th><th></th></tr></thead><tbody>` +
     insts.map(i => { const c = conteoInst(i), vencida = i.vence && i.vence < new Date().toISOString().slice(0, 10);
-      return `<tr><td><b>${esc(i.nombre)}</b></td><td><span class="tag">${i.tipo === "universidad" ? "Universidad" : "Colegio"}</span></td>
+      return `<tr><td><b>${esc(i.nombre)}</b></td><td><span class="tag">${etiquetaTipo(i)}</span></td>
       <td style="white-space:nowrap"><input id="dom${i.id}" value="${esc(i.dominio || "")}" placeholder="midominio.edu" style="width:130px" autocapitalize="none"> <button class="btn sm sec" data-a="inst-dominio" data-id="${i.id}">Guardar</button></td>
       <td>${i.google_workspace ? `<span class="pill ok" style="white-space:normal">Cuentas reales</span>` : i.dominio ? `<small>Solo correo del sistema</small>` : `<small>—</small>`}</td><td><code>Admin/${esc(i.slug)}</code></td><td>${c.docentes}</td><td>${c.estudiantes}</td>
       <td><input type="date" id="vence${i.id}" value="${esc(i.vence || "")}"></td>
       <td><span class="pill ${i.activa && !vencida ? "ok" : "no"}">${!i.activa ? "Suspendida" : vencida ? "Vencida" : "Activa"}</span></td>
       <td style="white-space:nowrap"><button class="btn sm sec" data-a="inst-guardar" data-id="${i.id}">Guardar fecha</button>
         <button class="btn sm sec" data-a="inst-toggle" data-id="${i.id}">${i.activa ? "Suspender" : "Reactivar"}</button>
-        <button class="btn sm sec" data-a="inst-tipo" data-id="${i.id}">Pasar a ${i.tipo === "universidad" ? "colegio" : "universidad"}</button>
+        <select id="tp${i.id}" title="Cambiar el tipo de institución">${[["primaria", "Colegio primaria"], ["secundaria", "Colegio secundaria"], ["universidad", "Universidad"]].map(([v, n]) => `<option value="${v}" ${v === (i.tipo === "universidad" ? "universidad" : i.nivel) ? "selected" : ""}>${n}</option>`).join("")}</select> <button class="btn sm sec" data-a="inst-tipo" data-id="${i.id}">Cambiar tipo</button>
         <button class="btn sm" data-a="inst-admin" data-id="${i.id}">+ Administrador</button>
         <button class="btn del" data-a="inst-del" data-id="${i.id}">Eliminar</button></td></tr>`; }).join("") + `</tbody></table></div>` : `<div class="empty">Aún no hay instituciones. Crea la primera arriba.</div>`;
   return `${crear}<div class="card"><h2>Instituciones</h2>${tabla}</div>`;
 }
-function filaItem(tipo, x) {
-  return `<tr><td>${esc(x.nombre)}</td><td style="white-space:nowrap;text-align:right"><button class="btn sm sec" data-a="${tipo}-ren" data-id="${x.id}">Renombrar</button> <button class="btn del" data-a="${tipo}-del" data-id="${x.id}">Quitar</button></td></tr>`;
+function filaItem(tipo, x, extra = "") {
+  return `<tr><td>${esc(x.nombre)}${extra ? ` <small>${esc(extra)}</small>` : ""}</td><td style="white-space:nowrap;text-align:right"><button class="btn sm sec" data-a="${tipo}-ren" data-id="${x.id}">Renombrar</button> <button class="btn del" data-a="${tipo}-del" data-id="${x.id}">Quitar</button></td></tr>`;
 }
 function vConfig() {
-  const tipo = yo.institucion.tipo, per = nomPeriodos(tipo), cs = miCursos(), ps = misPeriodos();
+  const inst = yo.institucion, tipo = inst.tipo, uni = tipo === "universidad", cs = miCursos(), ps = misPeriodos(), cars = carrerasDe(inst.id);
+  const carrerasCard = uni && yo.rol === "admin" ? `<div class="card"><h2>Carreras <small>${cars.length}</small></h2>
+    <p style="margin-top:0;color:var(--mute)">Lista de carreras de tu universidad, ya cargada. Cada una tiene su número de ciclos (Medicina: 14; las demás: 10). Los alumnos y los cursos pertenecen a una carrera: agrega las que falten o quita las que no ofrezcas.</p>
+    <form class="bar" id="fCarrera"><input name="nombre" placeholder="Nueva carrera (p. ej. Odontología)" maxlength="80" required style="flex:1;min-width:220px"><select name="ciclos" title="Número de ciclos"><option value="">Ciclos: automático (Medicina 14, otras 10)</option>${[...Array(14)].map((_, i) => `<option value="${i + 1}">${i + 1} ciclos</option>`).join("")}</select><button class="btn">Agregar carrera</button></form><div class="err"></div>
+    <div class="scroll"><table><thead><tr><th>Carrera</th><th>Ciclos</th><th>Alumnos</th><th>Cursos</th><th></th></tr></thead><tbody>${cars.map(c => `<tr><td><input id="cn${c.id}" value="${esc(c.nombre)}" style="width:100%;min-width:180px"></td><td><select id="cc${c.id}">${[...Array(14)].map((_, i) => `<option value="${i + 1}" ${c.ciclos === i + 1 ? "selected" : ""}>${i + 1}</option>`).join("")}</select></td><td>${est.filter(e => e.carrera_id === c.id).length}</td><td>${cs.filter(x => x.carrera_id === c.id).length}</td>
+      <td style="white-space:nowrap"><button class="btn sm sec" data-a="carrera-guardar" data-id="${c.id}">Guardar</button> <button class="btn del" data-a="carrera-del" data-id="${c.id}">Quitar</button></td></tr>`).join("")}</tbody></table></div></div>` : "";
+  const campoCarrera = uni ? `<select name="carrera" id="cursoCar" title="Carrera del curso"><option value="">Curso común (todas las carreras)</option>${cars.map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join("")}</select><select name="ciclo" id="cursoCiclo" title="Ciclo" disabled><option value="">Ciclo</option></select>` : "";
+  const grupos = gruposCursos(cs);
   const cursosCard = `<div class="card"><h2>Cursos <small>${cs.length}</small></h2>
-    <p style="margin-top:0;color:var(--mute)">${cs.length ? "Los cursos que no vengan por defecto se agregan aquí." : "Aún no hay cursos: agrega los de tu institución."} Quitar un curso borra también sus notas.</p>
-    <form class="bar" id="fCurso"><input name="nombre" placeholder="Nombre del curso nuevo" maxlength="80" required style="flex:1;min-width:220px"><button class="btn">Agregar curso</button></form><div class="err"></div>
-    ${cs.length ? `<div class="scroll"><table><tbody>${cs.map(c => filaItem("curso", c)).join("")}</tbody></table></div>` : ""}</div>`;
+    <p style="margin-top:0;color:var(--mute)">${cs.length ? "Agrega los cursos que no vengan por defecto." : "Aún no hay cursos: agrega los de tu institución."}${uni ? " En una universidad cada curso pertenece a una carrera y a un ciclo de su plan de estudios." : ""} Quitar un curso borra también sus notas.</p>
+    <form class="bar" id="fCurso"><input name="nombre" placeholder="Nombre del curso nuevo" maxlength="80" required style="flex:1;min-width:220px">${campoCarrera}<button class="btn">Agregar curso</button></form><div class="err"></div>
+    ${grupos.map(g => `<div class="scroll">${g.titulo ? `<h3 style="margin:14px 0 4px;font-size:14px">${esc(g.titulo)}</h3>` : ""}<table><tbody>${g.lista.map(c => filaItem("curso", c, c.ciclo ? "Ciclo " + c.ciclo : "")).join("")}</tbody></table></div>`).join("")}</div>`;
   const perCard = yo.rol === "admin" && tipo !== "universidad" ? `<div class="card"><h2>${tipo === "universidad" ? "Ciclos" : "Trimestres"} <small>${ps.length}</small></h2>
     <p style="margin-top:0;color:var(--mute)">Las notas se registran dentro de un ${nomPeriodo(tipo).toLowerCase()}. Quitar uno borra también sus notas (siempre debe quedar al menos uno).</p>
     <form class="bar" id="fPeriodo"><input name="nombre" placeholder="${tipo === "universidad" ? "p. ej. Ciclo 2026-II" : "p. ej. Trimestre 4"}" maxlength="40" required style="flex:1;min-width:220px"><button class="btn">Agregar ${nomPeriodo(tipo).toLowerCase()}</button></form><div class="err"></div>
     <div class="scroll"><table><tbody>${ps.map(p => filaItem("periodo", p)).join("")}</tbody></table></div></div>` : "";
-  return cursosCard + perCard;
+  return carrerasCard + cursosCard + perCard;
 }
 function vCarpetas() {
   const ul = items => `<ul>${items || "<li><small>—</small></li>"}</ul>`;
@@ -1061,6 +1103,67 @@ function vCarpetas() {
         return `<li><details><summary>📁 ${esc(d.usuario)} <small>${esc(nombreCompleto(d))}</small></summary><ul><li><details><summary>📁 Alumnos (${al.length})</summary>${ul(al.map(alumnoLi).join(""))}</details></li></ul></details></li>`; }).join("")}
         ${sinDoc.length ? `<li><details><summary>📁 _sin_docente (${sinDoc.length})</summary>${ul(sinDoc.map(alumnoLi).join(""))}</details></li>` : ""}</ul></details></li></ul></details></li>`; }).join("");
   return `<div class="card"><h2>Carpetas</h2><ul class="tree"><li><details open><summary>📁 <b>Admin</b> <small>${esc(nombreCompleto(yo))}</small></summary><ul>${arbol || "<li><small>Aún no hay instituciones.</small></li>"}</ul></details></li></ul></div>`;
+}
+/* ===== Docentes por curso e inscripciones (administrador; secundaria y universidad) ===== */
+let insc = { modo: "curso", carrera: "", curso: "", alumno: "", filtro: "" };
+const ordenCursos = l => l.slice().sort((a, b) => (a.ciclo || 99) - (b.ciclo || 99) || a.orden - b.orden);
+// Cursos agrupados por carrera (universidad) o en un solo grupo (colegio)
+function gruposCursos(cs) {
+  const inst = yo.institucion;
+  return inst.tipo === "universidad"
+    ? [...carrerasDe(inst.id).map(c => ({ titulo: c.nombre, lista: ordenCursos(cs.filter(x => x.carrera_id === c.id)) })), { titulo: "Cursos comunes", lista: ordenCursos(cs.filter(x => !x.carrera_id)) }].filter(g => g.lista.length)
+    : [{ titulo: "", lista: ordenCursos(cs) }];
+}
+function vAsignaciones() {
+  const inst = yo.institucion, docs = docentesDe(inst.id), cs = miCursos();
+  if (!docs.length) return `<div class="card"><h2>Docentes y cursos</h2><div class="empty">Aún no hay docentes. Créalos en «${tituloRegistro()}».</div></div>`;
+  if (!cs.length) return `<div class="card"><h2>Docentes y cursos</h2><div class="empty">Aún no hay cursos. Agrégalos en «${tituloConfig()}».</div></div>`;
+  const grupos = gruposCursos(cs);
+  return `<div class="card"><h2>Docentes y cursos</h2><p style="margin-top:0;color:var(--mute)">Marca los cursos que dicta cada docente (uno o varios). Cada docente solo verá y calificará a los alumnos inscritos en sus cursos.</p>` +
+    docs.map((d, k) => { const mios = new Set(docCursos.filter(x => x.docente_id === d.id).map(x => x.curso_id));
+      return `<details class="acc" ${k === 0 ? "open" : ""}><summary><span>${esc(nombreCompleto(d))}</span><small id="asigN${d.id}">${mios.size} curso(s)</small></summary><div class="cuerpo">` +
+        grupos.map(g => `${g.titulo ? `<div style="font-weight:600;margin:10px 0 4px">${esc(g.titulo)}</div>` : ""}<div class="chips">${g.lista.map(c => `<label class="chk"><input type="checkbox" data-asig="${d.id}|${c.id}" ${mios.has(c.id) ? "checked" : ""}>${c.ciclo ? `<small>C${c.ciclo}</small> ` : ""}${esc(c.nombre)}</label>`).join("")}</div>`).join("") + `</div></details>`; }).join("") + `</div>`;
+}
+function tablaInscCurso() {
+  const curso = miCursos().find(c => String(c.id) === insc.curso), uni = yo.institucion.tipo === "universidad";
+  if (!curso) return `<div class="empty">Elige un curso para ver a sus alumnos.</div>`;
+  const q = insc.filtro.trim().toLowerCase();
+  const lista = est.filter(e => (!curso.carrera_id || e.carrera_id === curso.carrera_id) && (!q || (e.nombre + " " + e.codigo).toLowerCase().includes(q)));
+  if (!lista.length) return `<div class="empty">No hay alumnos${curso.carrera_id ? " en la carrera de este curso" : ""}${q ? " con ese filtro" : ""}.</div>`;
+  const n = lista.filter(e => inscrito(e.id, curso.id)).length;
+  return `<p style="color:var(--mute);margin:0 0 8px">${n} de ${lista.length} inscrito(s). Marca alumnos y pulsa un botón.</p><div class="scroll"><table><thead><tr><th><input type="checkbox" data-selall title="Marcar todos"></th><th>Alumno</th>${uni ? "<th>Carrera</th>" : ""}<th>Estado</th></tr></thead><tbody>` +
+    lista.map(e => { const car = carreraDe(e.carrera_id); return `<tr><td><input type="checkbox" data-selest="${e.id}"></td><td><div class="who">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div>${esc(e.nombre)}<small>${esc(e.codigo)}</small></div></div></td>${uni ? `<td>${car ? esc(car.nombre) : "<small>Sin carrera</small>"}</td>` : ""}<td>${inscrito(e.id, curso.id) ? `<span class="pill ok">Inscrito</span>` : "<small>—</small>"}</td></tr>`; }).join("") + `</tbody></table></div>`;
+}
+function inscPorAlumno(cs, uni) {
+  const al = est.find(e => String(e.id) === insc.alumno), car = al && carreraDe(al.carrera_id);
+  const cab = `<div class="card"><h2>Inscribir a un alumno en sus cursos</h2><div class="bar"><input id="iAlumno" list="iAlumnos" placeholder="Escribe el código o el nombre del alumno" value="${al ? esc(al.codigo + " — " + al.nombre) : ""}" style="flex:1;min-width:260px" autocomplete="off"><datalist id="iAlumnos">${est.map(e => `<option value="${esc(e.codigo + " — " + e.nombre)}"></option>`).join("")}</datalist></div>`;
+  if (!al) return cab + `<div class="empty">Elige un alumno.</div></div>`;
+  if (uni && !car) return cab + `<p class="msg warn">Este alumno no tiene carrera asignada: asígnala desde su ficha en «Estudiantes».</p></div>`;
+  const disp = cs.filter(c => !uni || !c.carrera_id || c.carrera_id === al.carrera_id);
+  const fila = c => { const ya = inscrito(al.id, c.id); return `<div class="perm" style="align-items:center"><span style="flex:1">${esc(c.nombre)}</span>${ya ? `<span class="pill ok">Inscrito</span>` : ""}<button class="btn sm ${ya ? "del" : ""}" data-a="insc-toggle" data-est="${al.id}" data-cur="${c.id}">${ya ? "Quitar" : "Inscribir"}</button></div>`; };
+  let cuerpo;
+  if (uni) {
+    cuerpo = [...Array(car.ciclos)].map((_, i) => i + 1).map(n => {
+      const l = ordenCursos(disp.filter(c => c.carrera_id && c.ciclo === n)); if (!l.length) return "";
+      const todos = l.every(c => inscrito(al.id, c.id));
+      return `<div style="margin:14px 0 4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>Ciclo ${n}</b><button class="btn sm ${todos ? "del" : "sec"}" data-a="insc-ciclo" data-est="${al.id}" data-ciclo="${n}" data-m="${todos ? 0 : 1}">${todos ? "Quitar todo el ciclo" : "Inscribir en todo el ciclo"}</button></div>${l.map(fila).join("")}`;
+    }).join("") + (() => { const l = ordenCursos(disp.filter(c => !c.carrera_id || !c.ciclo)); return l.length ? `<div style="margin:14px 0 4px"><b>Otros cursos</b></div>${l.map(fila).join("")}` : ""; })();
+  } else cuerpo = ordenCursos(disp).map(fila).join("");
+  return cab + `<p style="color:var(--mute);margin:8px 0 0">${uni ? `${esc(car.nombre)} · ${car.ciclos} ciclos` : "Cursos del colegio"}</p>${cuerpo || `<div class="empty">No hay cursos para mostrar.</div>`}</div>`;
+}
+function vInscripciones() {
+  const inst = yo.institucion, uni = inst.tipo === "universidad", cars = carrerasDe(inst.id), cs = miCursos();
+  const tab = (id, txt) => `<button class="${insc.modo === id ? "on" : ""}" data-a="insc-modo" data-id="${id}">${txt}</button>`;
+  const tabs = `<div class="tabs" style="max-width:420px">${tab("curso", "Por curso")}${tab("alumno", "Por alumno")}</div>`;
+  if (!cs.length) return tabs + `<div class="card"><h2>Inscripciones</h2><div class="empty">Aún no hay cursos. Agrégalos en «${tituloConfig()}».</div></div>`;
+  if (insc.modo === "alumno") return tabs + inscPorAlumno(cs, uni);
+  const csF = cs.filter(c => !insc.carrera || String(c.carrera_id) === insc.carrera);
+  const op = c => `<option value="${c.id}" ${String(c.id) === insc.curso ? "selected" : ""}>${uni && c.ciclo ? "C" + c.ciclo + " · " : ""}${esc(c.nombre)}</option>`;
+  const optCursos = uni ? gruposCursos(csF).map(g => `<optgroup label="${esc(g.titulo)}">${g.lista.map(op).join("")}</optgroup>`).join("") : csF.map(op).join("");
+  return tabs + `<div class="card"><h2>Inscribir alumnos en un curso</h2><div class="bar">${uni ? `<select id="iCar"><option value="">Todas las carreras</option>${cars.map(c => `<option value="${c.id}" ${String(c.id) === insc.carrera ? "selected" : ""}>${esc(c.nombre)}</option>`).join("")}</select>` : ""}
+    <select id="iCur"><option value="">Elige el curso…</option>${optCursos}</select><input id="inscFiltro" placeholder="Filtrar alumnos" value="${esc(insc.filtro)}"></div>
+    <div class="bar"><button class="btn" data-a="insc-aplicar" data-m="1">Inscribir marcados</button><button class="btn del" data-a="insc-aplicar" data-m="0">Quitar marcados</button></div>
+    <div id="inscTabla">${tablaInscCurso()}</div></div>`;
 }
 // Pantalla «Correo» del administrador: dominio institucional + conexión de SU cuenta de Google para enviar credenciales
 function vCorreo() {
@@ -1180,7 +1283,7 @@ function pantallaApp() {
   let cuerpo;
   if (avisoCarga) cuerpo = `<div class="card"><h2>No se pudieron cargar los datos</h2><p class="err">${esc(avisoCarga)}</p><button class="btn" data-a="reintentar">Reintentar</button></div>`;
   else cuerpo = { panel: vPanel, mis: vMis, lista: vLista, registrar: vRegistrar, calificar: vCalificar, buscar: vBuscar, estadisticas: vEstadisticas,
-    usuarios: vUsuarios, solicitudes: vSolicitudes, invitar: vInvitar, instituciones: vInstituciones, carpetas: vCarpetas, cuenta: vCuenta, config: vConfig, comentarios: vComentarios, descargar: vDescargar, cursos: vCursos, correo: vCorreo }[vista]();
+    usuarios: vUsuarios, solicitudes: vSolicitudes, invitar: vInvitar, instituciones: vInstituciones, carpetas: vCarpetas, cuenta: vCuenta, config: vConfig, comentarios: vComentarios, descargar: vDescargar, cursos: vCursos, correo: vCorreo, asignaciones: vAsignaciones, inscripciones: vInscripciones }[vista]();
   const aviso = yo.rol === "dueno" && yo.mantenimiento ? `<div class="msg warn" style="border-radius:0;text-align:center">⚠ El sistema está en mantenimiento: solo tú puedes usarlo. Reanúdalo en «Instituciones».</div>` : "";
   return `${cabecera(true, nav)}${aviso}<div class="layout"><nav>${nav}</nav><main id="main">${cuerpo}</main></div>`;
 }
@@ -1249,16 +1352,17 @@ function renderDetalle() {
   const e = est.find(x => x.id === detalleId); if (!e) { cerrarDlg(); return; }
   const staff = esStaff(), eNotas = staff && permisos.editar_notas, eDatos = staff && permisos.editar_estudiantes, eDel = staff && permisos.eliminar;
   const doc = perfilDe(e.docente_id), docs = yo.rol === "admin" ? docentesDe(yo.institucion.id) : [];
-  abrirDlg(`<div class="dhead">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div><b>${esc(e.nombre)}</b><small>${esc(e.codigo)} · Docente: ${doc ? esc(nombreCompleto(doc)) : "—"}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>
+  abrirDlg(`<div class="dhead">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div><b>${esc(e.nombre)}</b><small>${esc(e.codigo)}${carreraDe(e.carrera_id) ? " · " + esc(carreraDe(e.carrera_id).nombre) : ""}${porCursoInst(e.institucion_id) ? "" : " · Docente: " + (doc ? esc(nombreCompleto(doc)) : "—")}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>
     <div class="bar">${selPeriodo()}</div>
     <div class="scroll"><table><thead><tr><th>Curso</th><th>Calificaciones</th><th>${esUni() ? "Prom. ponderado" : "Promedio"}</th></tr></thead><tbody>` +
-    (cursosDe(e.institucion_id).map(c => { const v = e.deCurso(c.id);
+    (cursosDeEst(e).map(c => { const v = e.deCurso(c.id);
       return `<tr><td>${esc(c.nombre)}</td><td>${v.length ? v.map(n => notaChip(n, eNotas ? `<button class="mini" data-a="nota-ed" data-id="${n.id}" title="Editar">✎</button><button class="mini" data-a="nota-rm" data-id="${n.id}" title="Quitar">×</button>` : "")).join("") : "<small>(sin notas)</small>"}
       ${eNotas ? `<button class="btn sm sec" data-a="nota-nueva" data-c="${c.id}" title="Agregar una nota a este curso">+ Nota</button>` : ""}</td>
       <td>${v.length ? `<b>${fmt(mediaPond(v))}</b>` : "–"}</td></tr>`; }).join("") || `<tr><td colspan="3"><small>La institución aún no tiene cursos.</small></td></tr>`) + `</tbody></table></div>${resumenPeriodos(e)}
     <p style="margin:12px 0 0">${esUni() ? "Promedio ponderado" : "Promedio general"}${periodoSel ? ` (${esc(periodoDe(periodoSel).nombre)})` : ""}: <b>${e.totalNotas() ? fmt(e.promedio()) : "—"}</b> · ${pill(e)}</p>` +
     (eDatos ? `<hr style="border:0;border-top:1px solid var(--line);margin:14px 0"><form class="bar" id="fEstDet"><input name="codigo" value="${esc(e.codigo)}" required style="width:130px"><input name="nombre" value="${esc(e.nombre)}" required style="flex:1;min-width:180px"><button class="btn sm">Guardar datos</button></form><div class="err" id="errDet"></div>` : `<div class="err" id="errDet"></div>`) +
-    (yo.rol === "admin" ? `<div class="bar"><select id="selDoc"><option value="">Sin docente</option>${docs.map(d => `<option value="${d.id}" ${d.id === e.docente_id ? "selected" : ""}>${esc(nombreCompleto(d))}</option>`).join("")}</select><button class="btn sm sec" data-a="reasignar">Cambiar docente</button></div>` : "") +
+    (yo.rol === "admin" && !porCursoInst(e.institucion_id) ? `<div class="bar"><select id="selDoc"><option value="">Sin docente</option>${docs.map(d => `<option value="${d.id}" ${d.id === e.docente_id ? "selected" : ""}>${esc(nombreCompleto(d))}</option>`).join("")}</select><button class="btn sm sec" data-a="reasignar">Cambiar docente</button></div>` : "") +
+    (yo.rol === "admin" && porCursoInst(e.institucion_id) ? `<div class="bar">${esUni() ? `<select id="selCarrera"><option value="">Sin carrera</option>${carrerasDe(yo.institucion.id).map(c => `<option value="${c.id}" ${c.id === e.carrera_id ? "selected" : ""}>${esc(c.nombre)}</option>`).join("")}</select><button class="btn sm sec" data-a="cambiar-carrera">Cambiar carrera</button>` : ""}<button class="btn sm sec" data-a="ir-insc" data-id="${e.id}">Inscripciones del alumno</button></div>` : "") +
     (eDel ? `<button class="btn del" data-a="borrar-est-det">Eliminar estudiante</button>` : ""));
 }
 // Formulario para agregar (id = null, con el curso elegido) o editar una calificación del estudiante abierto
@@ -1303,9 +1407,11 @@ const acciones = {
   "curso-fav"(d) { const id = idNum(d), f = new Set(favoritos()); f.has(id) ? f.delete(id) : f.add(id); guardarLocal("fav_" + yo.id, JSON.stringify([...f])); render(); },
   "curso-ver"(d) {
     const c = cursoDe(idNum(d)); if (!c) return;
-    const alumno = yo.rol === "alumno", mio = alumno ? est.find(x => x.perfil_id === yo.id) : null, ps = periodosDe(c.institucion_id);
+    const alumno = yo.rol === "alumno", mio = alumno ? est.find(x => x.perfil_id === yo.id) : null;
+    const ps = periodosDe(c.institucion_id).filter(p => !c.carrera_id || p.orden <= ((carreraDe(c.carrera_id) || {}).ciclos || 14));
+    const lista = alumno ? [] : est.filter(e => !porCursoInst(c.institucion_id) || inscrito(e.id, c.id) || e.deCurso(c.id, null).length);
     // un dato por periodo (trimestre o ciclo): sección desplegable con sus notas (alumno) o sus estudiantes (personal)
-    const datos = ps.map(p => ({ p, ns: alumno ? (mio ? mio.deCurso(c.id, p.id) : []) : est.flatMap(e => e.deCurso(c.id, p.id)) }));
+    const datos = ps.map(p => ({ p, ns: alumno ? (mio ? mio.deCurso(c.id, p.id) : []) : lista.flatMap(e => e.deCurso(c.id, p.id)) }));
     const abierto = periodoSel || (datos.find(x => x.ns.length) || {}).p?.id;
     const secciones = datos.map(({ p, ns }) => {
       let cuerpo;
@@ -1314,12 +1420,12 @@ const acciones = {
           ns.map(n => `<tr><td>${n.titulo ? esc(n.titulo) : "<small>—</small>"}</td><td><span class="note">${n.v}</span></td>${esUni() ? `<td>${n.peso}</td>` : ""}<td>${n.comentario ? esc(n.comentario) : "<small>—</small>"}</td></tr>`).join("") + `</tbody></table></div>`
           : `<div class="empty">Aún no tienes notas en este ${nomPeriodo(yo.institucion.tipo).toLowerCase()}.</div>`;
       } else {
-        cuerpo = est.length ? `<div class="scroll"><table><thead><tr><th>Estudiante</th><th>Notas</th><th>Promedio</th><th></th></tr></thead><tbody>` +
-          est.map(e => { const m = e.deCurso(c.id, p.id); return `<tr><td><div class="who">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div>${esc(e.nombre)}<small>${esc(e.codigo)}</small></div></div></td><td>${m.length}</td><td>${m.length ? `<b>${fmt(mediaPond(m))}</b>` : "–"}</td>
-            <td><button class="btn sm sec" data-a="ver" data-id="${e.id}">Ver / editar</button></td></tr>`; }).join("") + `</tbody></table></div>` : `<div class="empty">No hay estudiantes todavía.</div>`;
+        cuerpo = lista.length ? `<div class="scroll"><table><thead><tr><th>Estudiante</th><th>Notas</th><th>Promedio</th><th></th></tr></thead><tbody>` +
+          lista.map(e => { const m = e.deCurso(c.id, p.id); return `<tr><td><div class="who">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div>${esc(e.nombre)}<small>${esc(e.codigo)}</small></div></div></td><td>${m.length}</td><td>${m.length ? `<b>${fmt(mediaPond(m))}</b>` : "–"}</td>
+            <td><button class="btn sm sec" data-a="ver" data-id="${e.id}">Ver / editar</button></td></tr>`; }).join("") + `</tbody></table></div>` : `<div class="empty">No hay alumnos inscritos en este curso.</div>`;
       }
       const resumen = alumno ? (ns.length ? `${ns.length} nota(s) · prom. <b>${fmt(mediaPond(ns))}</b>` : "Sin notas")
-        : (() => { const con = est.filter(e => e.deCurso(c.id, p.id).length); return con.length ? `${con.length} estudiante(s) · prom. <b>${fmt(media(con.map(e => e.promedioCurso(c.id, p.id))))}</b>` : "Sin notas"; })();
+        : (() => { const con = lista.filter(e => e.deCurso(c.id, p.id).length); return con.length ? `${con.length} estudiante(s) · prom. <b>${fmt(media(con.map(e => e.promedioCurso(c.id, p.id))))}</b>` : "Sin notas"; })();
       return `<details class="acc ${ns.length ? "" : "vacio"}" ${p.id === abierto ? "open" : ""}><summary><span>${esc(p.nombre)}</span><small>${resumen}</small></summary><div class="cuerpo">${cuerpo}</div></details>`;
     }).join("");
     const total = alumno ? (mio ? mio.deCurso(c.id, null) : []) : [];
@@ -1337,6 +1443,32 @@ const acciones = {
     if (on && !confirm("Al registrar a cada persona se creará una cuenta REAL de Google en tu dominio, con una contraseña temporal. ¿Activarlo?")) return;
     await rpc("actualizar_cuentas_google", { p_activo: on }); yo = await rpc("mi_sesion"); render();
     toast(on ? "Se crearán cuentas reales de Google al registrar personas." : "Creación de cuentas de Google desactivada.");
+  },
+  async "carrera-guardar"(d) { const id = idNum(d); await rpc("editar_carrera", { p_id: id, p_nombre: $(`#cn${id}`).value, p_ciclos: Number($(`#cc${id}`).value) }); await recargarTodo(); toast("Carrera actualizada."); },
+  async "carrera-del"(d) {
+    const c = carreraDe(idNum(d)), nc = cursos.filter(x => x.carrera_id === c.id).length;
+    if (confirm(`¿Quitar la carrera «${c.nombre}»?` + (nc ? ` Se borrarán también sus ${nc} curso(s).` : ""))) { await rpc("eliminar_carrera", { p_id: c.id }); await recargarTodo(); toast("Carrera eliminada."); }
+  },
+  "insc-modo"(d) { insc.modo = d.id; conTransicion(render); },
+  async "insc-aplicar"(d) {
+    const ids = [...document.querySelectorAll("#inscTabla [data-selest]:checked")].map(x => Number(x.dataset.selest));
+    if (!insc.curso) { toast("Elige un curso."); return; }
+    if (!ids.length) { toast("Marca al menos un alumno."); return; }
+    const n = await rpc("inscribir_estudiantes", { p_curso: Number(insc.curso), p_estudiantes: ids, p_inscribir: d.m === "1" });
+    await recargarTodo(); toast(d.m === "1" ? `${n} alumno(s) inscrito(s).` : `${n} inscripción(es) quitada(s).`);
+  },
+  async "insc-toggle"(d) {
+    const e = Number(d.est), c = Number(d.cur);
+    await rpc("inscribir_estudiantes", { p_curso: c, p_estudiantes: [e], p_inscribir: !inscrito(e, c) }); await recargarTodo();
+  },
+  async "insc-ciclo"(d) {
+    const n = await rpc("inscribir_ciclo", { p_estudiante: Number(d.est), p_ciclo: Number(d.ciclo), p_inscribir: d.m === "1" });
+    await recargarTodo(); toast(d.m === "1" ? `Inscrito en ${n} curso(s) del ciclo ${d.ciclo}.` : `Se quitaron ${n} inscripción(es) del ciclo ${d.ciclo}.`);
+  },
+  "ir-insc"(d) { insc.modo = "alumno"; insc.alumno = String(d.id); cerrarDlg(); irA("inscripciones"); },
+  async "cambiar-carrera"() {
+    const v = $("#selCarrera").value; if (!v) { toast("Elige una carrera."); return; }
+    await rpc("cambiar_carrera_estudiante", { p_est: detalleId, p_carrera: Number(v) }); await recargarTodo(); renderDetalle(); toast("Carrera actualizada.");
   },
   "inv-modo"(d) { invModo = d.id; conTransicion(render); },
   async "inst-dominio"(d) {
@@ -1362,7 +1494,7 @@ const acciones = {
       for (let i = 0; i < validas.length; i += 20) {   // por tandas de 20: la base limita cada llamada y el envío de correos va escalonado
         const lote = validas.slice(i, i + 20); prog(`Creando ${Math.min(i + 20, validas.length)} de ${validas.length}…`);
         const r = await rpc("crear_invitaciones_masivo", { p_items: lote.map(f => ({ nombres: f.nombres, ap1: f.ap1, ap2: f.ap2, correo: f.correo })),
-          p_rol: masivo.rol, p_docente: masivo.rol === "alumno" && masivo.docente ? masivo.docente : null, p_institucion: yo.rol === "dueno" ? instMasivo() : null });
+          p_rol: masivo.rol, p_docente: masivo.rol === "alumno" && masivo.docente ? masivo.docente : null, p_institucion: yo.rol === "dueno" ? instMasivo() : null, p_carrera: masivo.rol === "alumno" && masivo.carrera ? Number(masivo.carrera) : null });
         r.forEach((x, k) => res.push({ ...x, correo_personal: x.correo_personal || lote[k].correo }));
       }
     } catch (e) { toast("Se interrumpió: " + e.message + ". Revisa «Cuentas pendientes de activar»."); }
@@ -1429,9 +1561,15 @@ const acciones = {
     if (confirm(`¿Quitar «${p.nombre}»?` + (n ? ` Se borrarán también ${n} nota(s) de ese periodo.` : ""))) { await rpc("eliminar_periodo", { p_id: p.id }); await recargarTodo(); toast("Eliminado."); }
   },
   async "inst-tipo"(d) {
-    const i = instDe(idNum(d)), nuevo = i.tipo === "universidad" ? "colegio" : "universidad";
-    if (!confirm(nuevo === "colegio" ? `¿Pasar «${i.nombre}» a colegio? Todas las notas con peso volverán a valer 1.` : `¿Pasar «${i.nombre}» a universidad? Podrán usar pesos en las notas.`)) return;
-    await rpc("cambiar_tipo_institucion", { p_id: i.id, p_tipo: nuevo }); await recargarTodo(); toast("Tipo actualizado.");
+    const i = instDe(idNum(d)), v = $(`#tp${i.id}`).value, actual = i.tipo === "universidad" ? "universidad" : i.nivel;
+    if (v === actual) { toast("Ya es de ese tipo."); return; }
+    const aCursos = (v === "secundaria" || v === "universidad") && !(actual === "secundaria" || actual === "universidad");
+    const aviso = aCursos ? `¿Pasar «${i.nombre}» a ${v === "universidad" ? "universidad" : "colegio secundaria"}? Los alumnos actuales se inscribirán en los cursos que ya existen y los docentes con alumnos recibirán todos los cursos; después ajústalo en «Docentes y cursos» e «Inscripciones».`
+      : v === "primaria" ? `¿Pasar «${i.nombre}» a colegio primaria? Cada docente volverá a ver solo a los alumnos que tiene a cargo, y las notas con peso volverán a valer 1.`
+      : `¿Cambiar «${i.nombre}» a ${v === "universidad" ? "universidad" : "colegio secundaria"}?`;
+    if (!confirm(aviso)) return;
+    await rpc("cambiar_tipo_institucion", { p_id: i.id, p_tipo: v === "universidad" ? "universidad" : "colegio", p_nivel: v === "universidad" ? null : v });
+    await recargarTodo(); toast("Tipo actualizado.");
   },
   async "inst-del"(d) {
     const i = instDe(idNum(d)), c = conteoInst(i);
@@ -1454,7 +1592,8 @@ const acciones = {
   async "borrar-inv"(d) { if (confirm("¿Anular esta cuenta pendiente?")) { await rpc("eliminar_invitacion", { p_id: idNum(d) }); await recargarTodo(); toast("Invitación anulada."); } },
   async aprobar(d) {
     const s = solic.find(x => x.id === idNum(d)), selDoc = $(`#doc${s.id}`);
-    const v = await rpc("aprobar_solicitud", { p_id: s.id, p_docente: selDoc ? selDoc.value || null : null });
+    const selCar = $(`#car${s.id}`);
+    const v = await rpc("aprobar_solicitud", { p_id: s.id, p_docente: selDoc ? selDoc.value || null : null, p_carrera: selCar && selCar.value ? Number(selCar.value) : null });
     await recargarTodo(); mostrarCredenciales(v, `Solicitud aprobada: ${nombreCompleto(s)}`);
   },
   async rechazar(d) { if (confirm("¿Rechazar esta solicitud?")) { await rpc("rechazar_solicitud", { p_id: idNum(d) }); await recargarTodo(); toast("Solicitud rechazada."); } },
@@ -1487,12 +1626,20 @@ const acciones = {
 };
 function actualizarFormInvitar() {
   const f = $("#fInv"); if (!f) return;
-  const alumno = f.rol.value === "alumno", card = f.closest(".card");
+  const instId = yo.rol === "dueno" ? Number(f.inst.value) : yo.institucion.id, inst = instDeId(instId);
+  const alumno = f.rol.value === "alumno", card = f.closest(".card"), pc = porCursoInst(instId), uni = !!inst && inst.tipo === "universidad";
   card.querySelector("h2").textContent = tituloFormInv(alumno);   // el título sigue al rol elegido
   f.querySelector("button:not([type=button])").textContent = yo.rol === "dueno" || alumno ? "Registrar" : "Crear cuenta";
-  const w = $("#invDocWrap"); if (!w) return;
-  w.style.display = f.rol.value === "alumno" ? "" : "none";
-  if (yo.rol === "dueno") { const docs = docentesDe(Number(f.inst.value)); f.docente.innerHTML = docs.map(d => `<option value="${d.id}">${esc(nombreCompleto(d))}</option>`).join("") || "<option value=''>(no hay docentes)</option>"; }
+  const w = $("#invDocWrap");   // en secundaria y universidad el alumno no tiene un docente único: se inscribe en cursos
+  if (w) {
+    w.style.display = alumno && !pc ? "" : "none";
+    if (yo.rol === "dueno") { const docs = docentesDe(instId); f.docente.innerHTML = docs.map(d => `<option value="${d.id}">${esc(nombreCompleto(d))}</option>`).join("") || "<option value=''>(no hay docentes)</option>"; }
+  }
+  const cw = $("#invCarWrap");
+  if (cw) {
+    const actual = f.carrera.value; cw.style.display = alumno && uni ? "" : "none"; f.carrera.required = alumno && uni;
+    f.carrera.innerHTML = `<option value="">Elige la carrera</option>` + carrerasDe(instId).map(c => `<option value="${c.id}">${esc(c.nombre)} (${c.ciclos} ciclos)</option>`).join(""); f.carrera.value = actual;
+  }
 }
 
 document.addEventListener("click", async ev => {
@@ -1512,7 +1659,8 @@ document.addEventListener("keydown", ev => {
 let tBusqueda, tFiltro;
 document.addEventListener("input", ev => {
   const t = ev.target;
-  if (t.id === "calCodigo") { const e = calEstudiante(); if ((e ? e.id : null) !== calEstId) repintarCal(); }
+  if (t.id === "inscFiltro") { insc.filtro = t.value; clearTimeout(tFiltro); tFiltro = setTimeout(() => { const c = $("#inscTabla"); if (c) c.innerHTML = tablaInscCurso(); }, 120); }
+  else if (t.id === "calCodigo") { const e = calEstudiante(); if ((e ? e.id : null) !== calEstId) repintarCal(); }
   else if (t.id === "flt") {
     filtro = t.value; clearTimeout(tFiltro);
     tFiltro = setTimeout(() => { const p = t.selectionStart; $("#main").innerHTML = vLista(); const f = $("#flt"); f.focus(); f.setSelectionRange(p, p); }, 120);   // espera a que termines de escribir
@@ -1537,8 +1685,24 @@ document.addEventListener("change", ev => {
   else if (t.id === "instWs") { const dom = $("#instDom"); dom.required = t.value === "si"; if (t.value === "si") dom.focus(); }
   else if (t.id === "mInst" || t.id === "mRol") {
     masivo.texto = $("#masTexto").value; masivo.orden = $("#fMas").orden.value;
-    if (t.id === "mInst") { masivo.inst = t.value; masivo.docente = ""; } else masivo.rol = t.value;
+    if (t.id === "mInst") { masivo.inst = t.value; masivo.docente = ""; masivo.carrera = ""; } else { masivo.rol = t.value; masivo.carrera = ""; }
     masivo.filas = null; render();
+  }
+  else if (t.id === "cursoCar") {
+    const car = carreraDe(Number(t.value)), sc = $("#cursoCiclo"); sc.disabled = !car;
+    sc.innerHTML = car ? `<option value="">Sin ciclo</option>` + [...Array(car.ciclos)].map((_, i) => `<option value="${i + 1}">Ciclo ${i + 1}</option>`).join("") : `<option value="">Ciclo</option>`;
+  }
+  else if (t.id === "iCar") { insc.carrera = t.value; insc.curso = ""; render(); }
+  else if (t.id === "iCur") { insc.curso = t.value; render(); }
+  else if (t.id === "iAlumno") { const cod = t.value.split(" — ")[0].trim().toUpperCase(), e = est.find(x => x.codigo.toUpperCase() === cod); insc.alumno = e ? String(e.id) : ""; render(); }
+  else if (t.id === "mCar") masivo.carrera = t.value;
+  else if (t.matches && t.matches("[data-selall]")) document.querySelectorAll("#inscTabla [data-selest]").forEach(x => { x.checked = t.checked; });
+  else if (t.dataset && t.dataset.asig !== undefined) {
+    const [doc, cur] = t.dataset.asig.split("|"), marcado = t.checked, cid = Number(cur);
+    rpc("asignar_curso_docente", { p_docente: doc, p_curso: cid, p_asignar: marcado }).then(() => {
+      docCursos = docCursos.filter(x => !(x.docente_id === doc && x.curso_id === cid)); if (marcado) docCursos.push({ docente_id: doc, curso_id: cid });
+      const el = $("#asigN" + doc); if (el) el.textContent = docCursos.filter(x => x.docente_id === doc).length + " curso(s)";
+    }).catch(e => { t.checked = !marcado; toast(e.message); });
   }
   else if (t.id === "fotoIn") subirFoto(t.files[0]).catch(e => toast(e.message));
 });
@@ -1595,11 +1759,11 @@ document.addEventListener("submit", ev => {
       await rpc("actualizar_permisos", { p_perfil: p.id, p_permisos: nuevos }); cerrarDlg(); await recargarTodo(); toast("Permisos guardados.");
     } else if (f.id === "fInv") {
       const v = await rpc("crear_invitacion", { p_rol: d.rol, p_nombres: d.nombres, p_apellidos: d.apellidos || "",
-        p_institucion: d.inst ? Number(d.inst) : null, p_docente: d.rol === "alumno" && d.docente ? d.docente : null, p_correo: (d.correo || "").trim() || null });
+        p_institucion: d.inst ? Number(d.inst) : null, p_docente: d.rol === "alumno" && d.docente && !porCursoInst(d.inst ? Number(d.inst) : yo.institucion.id) ? d.docente : null, p_correo: (d.correo || "").trim() || null, p_carrera: d.rol === "alumno" && d.carrera ? Number(d.carrera) : null });
       await recargarTodo(); mostrarCredenciales(v);
     } else if (f.id === "fInst") {
       if (d.workspace === "si" && !(d.dominio || "").trim()) falla("Si la institución ya tiene Google Workspace, escribe su dominio (por ejemplo midominio.edu).");
-      const nuevaId = await rpc("crear_institucion", { p_nombre: d.nombre, p_vence: d.vence || null, p_tipo: d.tipo });
+      const nuevaId = await rpc("crear_institucion", { p_nombre: d.nombre, p_vence: d.vence || null, p_tipo: d.tipo === "universidad" ? "universidad" : "colegio", p_nivel: d.tipo === "secundaria" ? "secundaria" : "primaria" });
       if ((d.dominio || "").trim()) await rpc("actualizar_dominio", { p_inst: nuevaId, p_dominio: d.dominio }); await recargarTodo(); toast(d.workspace === "si" ? "Institución creada. Ahora crea su administrador: él conectará su Google Workspace en «Correo institucional»." : "Institución creada. Ahora crea su administrador.");
     } else if (f.id === "fMant") {
       const pausar = !yo.mantenimiento;
@@ -1607,15 +1771,18 @@ document.addEventListener("submit", ev => {
       await rpc("poner_mantenimiento", { p_activo: pausar, p_mensaje: d.mensaje || null });
       yo = await rpc("mi_sesion"); render(); toast(pausar ? "Sistema en pausa." : "Sistema reanudado.");
     } else if (f.id === "fCurso") {
-      await rpc("crear_curso", { p_nombre: d.nombre }); await recargarTodo(); toast("Curso agregado.");
+      await rpc("crear_curso", { p_nombre: d.nombre, p_carrera: d.carrera ? Number(d.carrera) : null, p_ciclo: d.ciclo ? Number(d.ciclo) : null }); await recargarTodo(); toast("Curso agregado.");
+    } else if (f.id === "fCarrera") {
+      await rpc("crear_carrera", { p_nombre: d.nombre, p_ciclos: d.ciclos ? Number(d.ciclos) : null }); await recargarTodo(); toast("Carrera agregada.");
     } else if (f.id === "fPeriodo") {
       await rpc("crear_periodo", { p_nombre: d.nombre }); await recargarTodo(); toast("Agregado.");
     } else if (f.id === "fMas") {
-      Object.assign(masivo, { inst: d.inst || masivo.inst, rol: d.rol, docente: d.docente || "", orden: d.orden, texto: d.texto || "" });
+      Object.assign(masivo, { inst: d.inst || masivo.inst, rol: d.rol, docente: d.docente || "", carrera: d.carrera || "", orden: d.orden, texto: d.texto || "" });
       const filas = parsearMasivo(masivo.texto, masivo.orden);
       if (!filas.length) falla("Pega al menos una línea con un nombre completo.");
       if (filas.length > 300) falla("Máximo 300 personas por vez: divide la lista.");
-      if (masivo.rol === "alumno" && yo.rol !== "docente" && !masivo.docente) falla("Elige el docente de estos alumnos.");
+      if (masivo.rol === "alumno" && yo.rol !== "docente" && !porCursoInst(instMasivo()) && !masivo.docente) falla("Elige el docente de estos alumnos.");
+      if (masivo.rol === "alumno" && (instDeId(instMasivo()) || {}).tipo === "universidad" && !masivo.carrera) falla("Elige la carrera de estos alumnos.");
       masivo.filas = filas; render(); setTimeout(() => { const c = document.querySelectorAll("#main > .card")[1]; if (c) c.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60);
     } else if (f.id === "fCorreo") {
       await rpc("configurar_correo_institucion", { p_url: d.url.trim(), p_secreto: d.secreto });
