@@ -122,6 +122,7 @@ create table if not exists carreras (
 create unique index if not exists carreras_nombre_unico on carreras (institucion_id, lower(nombre));
 
 alter table estudiantes add column if not exists carrera_id bigint references carreras (id) on delete restrict;
+alter table estudiantes add column if not exists ciclo smallint not null default 1 check (ciclo between 1 and 14);   -- ciclo actual del alumno (universidad)
 alter table cursos add column if not exists carrera_id bigint references carreras (id) on delete cascade;   -- null = curso comun
 alter table cursos add column if not exists ciclo smallint check (ciclo is null or ciclo between 1 and 14);
 drop index if exists cursos_nombre_unico;
@@ -155,6 +156,50 @@ begin
     select p_inst, c.n, _ciclos_defecto(c.n), c.o
     from unnest(array['Medicina Humana', 'Derecho', 'Administracion de Empresas', 'Contabilidad', 'Ingenieria de Sistemas',
                       'Ingenieria Civil', 'Psicologia', 'Enfermeria', 'Arquitectura', 'Educacion']) with ordinality as c(n, o);
+end $$;
+
+-- Inscripcion AUTOMATICA (los docentes se siguen asignando a mano):
+--   universidad: el alumno entra en los cursos de su carrera y su ciclo; al crear un curso entran los alumnos de esa carrera y ciclo.
+--   colegio secundaria: todos los alumnos llevan todos los cursos.
+-- El administrador puede quitar o agregar inscripciones a mano despues.
+create or replace function _autoinscribir_estudiante(p_est bigint) returns void language plpgsql security definer set search_path = public as $$
+declare e estudiantes; v_tipo text; v_nivel text;
+begin
+  select * into e from estudiantes where id = p_est;
+  if not found then return; end if;
+  select tipo, nivel into v_tipo, v_nivel from instituciones where id = e.institucion_id;
+  if v_tipo = 'universidad' then
+    if e.carrera_id is not null then
+      insert into inscripciones (estudiante_id, curso_id)
+        select e.id, c.id from cursos c
+        where c.institucion_id = e.institucion_id and c.carrera_id = e.carrera_id and c.ciclo = e.ciclo
+        on conflict do nothing;
+    end if;
+  elsif v_nivel = 'secundaria' then
+    insert into inscripciones (estudiante_id, curso_id)
+      select e.id, c.id from cursos c where c.institucion_id = e.institucion_id
+      on conflict do nothing;
+  end if;
+end $$;
+
+create or replace function _autoinscribir_curso(p_curso bigint) returns void language plpgsql security definer set search_path = public as $$
+declare c cursos; v_tipo text; v_nivel text;
+begin
+  select * into c from cursos where id = p_curso;
+  if not found then return; end if;
+  select tipo, nivel into v_tipo, v_nivel from instituciones where id = c.institucion_id;
+  if v_tipo = 'universidad' then
+    if c.carrera_id is not null and c.ciclo is not null then
+      insert into inscripciones (estudiante_id, curso_id)
+        select e.id, c.id from estudiantes e
+        where e.institucion_id = c.institucion_id and e.carrera_id = c.carrera_id and e.ciclo = c.ciclo
+        on conflict do nothing;
+    end if;
+  elsif v_nivel = 'secundaria' then
+    insert into inscripciones (estudiante_id, curso_id)
+      select e.id, c.id from estudiantes e where e.institucion_id = c.institucion_id
+      on conflict do nothing;
+  end if;
 end $$;
 
 -- Al pasar una institucion que ya tenia datos al modelo "por curso", nadie pierde acceso: los alumnos se inscriben en los cursos
@@ -703,7 +748,8 @@ end $$;
 
 drop function if exists _crear_invitacion(rol_usuario, text, text, bigint, uuid, uuid);
 drop function if exists _crear_invitacion(rol_usuario, text, text, bigint, uuid, uuid, text, text, text);
-create or replace function _crear_invitacion(p_rol rol_usuario, p_nombres text, p_apellidos text, p_inst bigint, p_docente uuid, p_creador uuid, p_correo text default null, p_ap1 text default null, p_ap2 text default null, p_carrera bigint default null)
+drop function if exists _crear_invitacion(rol_usuario, text, text, bigint, uuid, uuid, text, text, text, bigint);
+create or replace function _crear_invitacion(p_rol rol_usuario, p_nombres text, p_apellidos text, p_inst bigint, p_docente uuid, p_creador uuid, p_correo text default null, p_ap1 text default null, p_ap2 text default null, p_carrera bigint default null, p_ciclo int default 1)
 returns jsonb language plpgsql security definer set search_path = public, extensions as $$
 declare v_usuario text; v_codigo text; v_est bigint; v_cod_est text; base text; n int := 1; v_dom text; v_ci text; v_env boolean := false; v_gw boolean; v_cg text; v_tipo text;
 begin
@@ -711,8 +757,10 @@ begin
     select tipo into v_tipo from instituciones where id = p_inst;
     if v_tipo = 'universidad' then
       if p_carrera is null or not exists (select 1 from carreras where id = p_carrera and institucion_id = p_inst) then raise exception 'Elige la carrera del alumno.'; end if;
+      p_ciclo := coalesce(p_ciclo, 1);
+      if p_ciclo < 1 or p_ciclo > (select ciclos from carreras where id = p_carrera) then raise exception 'Esa carrera solo tiene % ciclos.', (select ciclos from carreras where id = p_carrera); end if;
     else
-      p_carrera := null;
+      p_carrera := null; p_ciclo := 1;
     end if;
   end if;
   v_usuario := _generar_usuario(p_nombres, p_apellidos, p_inst, p_ap1, p_ap2);
@@ -723,8 +771,9 @@ begin
     while exists (select 1 from estudiantes where institucion_id = p_inst and upper(codigo) = v_cod_est) loop
       n := n + 1; v_cod_est := base || n;
     end loop;
-    insert into estudiantes (institucion_id, docente_id, carrera_id, codigo, nombre)
-      values (p_inst, p_docente, p_carrera, v_cod_est, trim(p_nombres || ' ' || p_apellidos)) returning id into v_est;
+    insert into estudiantes (institucion_id, docente_id, carrera_id, ciclo, codigo, nombre)
+      values (p_inst, p_docente, p_carrera, coalesce(p_ciclo, 1), v_cod_est, trim(p_nombres || ' ' || p_apellidos)) returning id into v_est;
+    perform _autoinscribir_estudiante(v_est);   -- queda inscrito en los cursos de su carrera y ciclo
   end if;
   insert into invitaciones (institucion_id, rol, nombres, apellidos, usuario, codigo_hash, docente_id, estudiante_id, creado_por, correo)
     values (p_inst, p_rol, trim(p_nombres), trim(p_apellidos), v_usuario, crypt(v_codigo, gen_salt('bf')), p_docente, v_est, p_creador, nullif(trim(coalesce(p_correo, '')), ''));
@@ -745,7 +794,8 @@ end $$;
 -- Crea una cuenta pendiente de activar; devuelve usuario + codigo (el codigo solo se ve ahora)
 drop function if exists crear_invitacion(text, text, text, bigint, uuid);
 drop function if exists crear_invitacion(text, text, text, bigint, uuid, text, text, text);
-create or replace function crear_invitacion(p_rol text, p_nombres text, p_apellidos text, p_institucion bigint default null, p_docente uuid default null, p_correo text default null, p_ap1 text default null, p_ap2 text default null, p_carrera bigint default null)
+drop function if exists crear_invitacion(text, text, text, bigint, uuid, text, text, text, bigint);
+create or replace function crear_invitacion(p_rol text, p_nombres text, p_apellidos text, p_institucion bigint default null, p_docente uuid default null, p_correo text default null, p_ap1 text default null, p_ap2 text default null, p_carrera bigint default null, p_ciclo int default 1)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare r rol_usuario := mi_rol(); v_rol rol_usuario; v_inst bigint; v_doc uuid;
 begin
@@ -778,13 +828,14 @@ begin
   else
     v_doc := null;   -- en secundaria/universidad el alumno no tiene un unico docente: se inscribe en cursos
   end if;
-  return _crear_invitacion(v_rol, p_nombres, p_apellidos, v_inst, v_doc, auth.uid(), p_correo, p_ap1, p_ap2, p_carrera);
+  return _crear_invitacion(v_rol, p_nombres, p_apellidos, v_inst, v_doc, auth.uid(), p_correo, p_ap1, p_ap2, p_carrera, p_ciclo);
 end $$;
 
 -- Varias cuentas a la vez: [{nombres, ap1, ap2, correo}]. Devuelve una fila por cuenta (credenciales o el motivo del error);
 -- un error en una fila no frena las demas. Maximo 30 por llamada (la web envia por tandas).
 drop function if exists crear_invitaciones_masivo(jsonb, text, uuid, bigint);
-create or replace function crear_invitaciones_masivo(p_items jsonb, p_rol text, p_docente uuid default null, p_institucion bigint default null, p_carrera bigint default null) returns jsonb
+drop function if exists crear_invitaciones_masivo(jsonb, text, uuid, bigint, bigint);
+create or replace function crear_invitaciones_masivo(p_items jsonb, p_rol text, p_docente uuid default null, p_institucion bigint default null, p_carrera bigint default null, p_ciclo int default 1) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare x jsonb; r jsonb := '[]'::jsonb; v jsonb; v_nom text;
 begin
@@ -795,7 +846,7 @@ begin
     v_nom := trim(coalesce(x ->> 'nombres', '') || ' ' || coalesce(x ->> 'ap1', '') || ' ' || coalesce(x ->> 'ap2', ''));
     begin
       v := crear_invitacion(p_rol, x ->> 'nombres', trim(coalesce(x ->> 'ap1', '') || ' ' || coalesce(x ->> 'ap2', '')),
-                            p_institucion, p_docente, x ->> 'correo', x ->> 'ap1', x ->> 'ap2', p_carrera);
+                            p_institucion, p_docente, x ->> 'correo', x ->> 'ap1', x ->> 'ap2', p_carrera, p_ciclo);
       r := r || jsonb_build_array(v || jsonb_build_object('ok', true, 'nombre', v_nom));
     exception when others then
       r := r || jsonb_build_array(jsonb_build_object('ok', false, 'nombre', v_nom, 'error', sqlerrm));
@@ -812,7 +863,8 @@ create or replace function _puede_resolver_solicitud(s solicitudes) returns bool
     else false end $$;
 
 drop function if exists aprobar_solicitud(bigint, uuid);
-create or replace function aprobar_solicitud(p_id bigint, p_docente uuid default null, p_carrera bigint default null) returns jsonb
+drop function if exists aprobar_solicitud(bigint, uuid, bigint);
+create or replace function aprobar_solicitud(p_id bigint, p_docente uuid default null, p_carrera bigint default null, p_ciclo int default 1) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare s solicitudes; v_doc uuid; v jsonb;
 begin
@@ -826,7 +878,7 @@ begin
       raise exception 'Elige el docente del alumno.';
     end if;
   end if;
-  v := _crear_invitacion(s.rol_solicitado::rol_usuario, s.nombres, s.apellidos, s.institucion_id, v_doc, auth.uid(), null, null, null, p_carrera);
+  v := _crear_invitacion(s.rol_solicitado::rol_usuario, s.nombres, s.apellidos, s.institucion_id, v_doc, auth.uid(), null, null, null, p_carrera, p_ciclo);
   update solicitudes set estado = 'aprobada' where id = p_id;
   return v;
 end $$;
@@ -978,6 +1030,7 @@ begin
   insert into cursos (institucion_id, nombre, orden, carrera_id, ciclo)
     values (v_inst, p_nombre, coalesce((select max(orden) from cursos where institucion_id = v_inst), 0) + 1, p_carrera, p_ciclo) returning id into v_id;
   if mi_rol() = 'docente' and _por_curso(v_inst) then insert into docente_cursos (docente_id, curso_id) values (auth.uid(), v_id); end if;   -- el docente que lo crea lo dicta
+  perform _autoinscribir_curso(v_id);   -- los alumnos de esa carrera y ciclo (o todos, en secundaria) quedan inscritos
   return v_id;
 end $$;
 
@@ -1124,6 +1177,7 @@ begin
     perform _guardar_comentario(v_nota, x ->> 'comentario');
     if _por_curso(v_inst) then insert into inscripciones (estudiante_id, curso_id) values (v_id, (x ->> 'curso')::bigint) on conflict do nothing; end if;
   end loop;
+  if _por_curso(v_inst) then perform _autoinscribir_estudiante(v_id); end if;
   return v_id;
 end $$;
 
@@ -1287,15 +1341,21 @@ begin
 end $$;
 
 -- Cambia la carrera de un alumno (se quitan sus inscripciones a cursos de otras carreras)
-create or replace function cambiar_carrera_estudiante(p_est bigint, p_carrera bigint) returns void
+drop function if exists cambiar_carrera_estudiante(bigint, bigint);
+create or replace function cambiar_carrera_estudiante(p_est bigint, p_carrera bigint, p_ciclo int default null) returns void
 language plpgsql security definer set search_path = public as $$
+declare v_ciclos int; v_ciclo int;
 begin
   if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
   if not exists (select 1 from estudiantes where id = p_est and institucion_id = mi_inst()) then raise exception 'Estudiante no encontrado.'; end if;
-  if not exists (select 1 from carreras where id = p_carrera and institucion_id = mi_inst()) then raise exception 'Carrera invalida.'; end if;
-  update estudiantes set carrera_id = p_carrera where id = p_est;
+  select ciclos into v_ciclos from carreras where id = p_carrera and institucion_id = mi_inst();
+  if not found then raise exception 'Carrera invalida.'; end if;
+  if p_ciclo is not null and (p_ciclo < 1 or p_ciclo > v_ciclos) then raise exception 'Esa carrera solo tiene % ciclos.', v_ciclos; end if;
+  v_ciclo := least(coalesce(p_ciclo, (select ciclo from estudiantes where id = p_est)), v_ciclos);
+  update estudiantes set carrera_id = p_carrera, ciclo = v_ciclo where id = p_est;
   delete from inscripciones where estudiante_id = p_est
     and curso_id in (select id from cursos where carrera_id is not null and carrera_id <> p_carrera);
+  perform _autoinscribir_estudiante(p_est);   -- se suma a los cursos de su ciclo (las inscripciones anteriores se conservan)
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -1381,6 +1441,14 @@ do $$ declare i record; begin
   for i in select id from instituciones where tipo = 'universidad' loop perform _sembrar_carreras(i.id); perform _migrar_a_cursos(i.id); end loop;
 end $$;
 
+-- Alumnos y cursos que ya existian: se inscribe automaticamente una sola vez (el marcador evita rehacerlo si se vuelve a ejecutar este script)
+do $$ declare r record; begin
+  if not exists (select 1 from config where clave = 'autoinscripcion_v1') then
+    for r in select e.id from estudiantes e where _por_curso(e.institucion_id) loop perform _autoinscribir_estudiante(r.id); end loop;
+    insert into config (clave, valor) values ('autoinscripcion_v1', '1');
+  end if;
+end $$;
+
 -- 11. Permisos de ejecucion: solo lo necesario queda abierto
 -- ---------------------------------------------------------------------------
 do $$
@@ -1404,7 +1472,7 @@ begin
   for f in select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname = any (array[
              '_generar_usuario', '_crear_invitacion', '_puede_resolver_solicitud', '_puede_invitacion', '_puedo_gestionar', '_alcance_perfil', 'crear_invitacion_dueno',
-             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario', '_enviar_credenciales', 'configurar_correo', '_sembrar_carreras', '_migrar_a_cursos', '_ciclos_defecto', '_puedo_calificar'])
+             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario', '_enviar_credenciales', 'configurar_correo', '_sembrar_carreras', '_migrar_a_cursos', '_ciclos_defecto', '_puedo_calificar', '_autoinscribir_estudiante', '_autoinscribir_curso'])
   loop
     execute format('revoke all on function %s from public, anon, authenticated', f);
   end loop;

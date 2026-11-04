@@ -508,7 +508,7 @@ async function activarCuenta(usuario, codigo, clave) {
 class Estudiante {
   constructor(d) {
     this.id = d.id; this.codigo = d.codigo; this.nombre = d.nombre; this.docente_id = d.docente_id;
-    this.perfil_id = d.perfil_id; this.institucion_id = d.institucion_id; this.carrera_id = d.carrera_id || null;
+    this.perfil_id = d.perfil_id; this.institucion_id = d.institucion_id; this.carrera_id = d.carrera_id || null; this.ciclo = d.ciclo || 1;
     this.notas = (d.notas || []).map(n => ({ id: n.id, curso: n.curso_id, periodo: n.periodo_id, v: Number(n.nota), peso: n.peso || 1,
       titulo: n.titulo || "", comentario: (n.notas_detalle && n.notas_detalle.comentario) || "" })).sort((a, b) => a.id - b.id);
   }
@@ -566,7 +566,7 @@ const perfilDe = id => perfiles.find(p => p.id === id);
 const docentesDe = instId => perfiles.filter(p => p.rol === "docente" && p.institucion_id === instId);
 const instDe = id => insts.find(i => i.id === id);
 
-const SEL_EST = "estudiantes?select=id,codigo,nombre,docente_id,perfil_id,institucion_id,carrera_id,notas(id,curso_id,periodo_id,nota,peso,titulo,notas_detalle(comentario))&order=id";
+const SEL_EST = "estudiantes?select=id,codigo,nombre,docente_id,perfil_id,institucion_id,carrera_id,ciclo,notas(id,curso_id,periodo_id,nota,peso,titulo,notas_detalle(comentario))&order=id";
 async function recargarEst() { est = (await sel(SEL_EST)).map(d => new Estudiante(d)); }
 // Consultas que no dependen del rol (la base ya filtra por cuenta): se lanzan a la vez que mi_sesion al entrar
 const consultasComunes = () => Promise.all([
@@ -674,7 +674,7 @@ function filas(lista, { acciones = true, soloNombres = false } = {}) {
     (soloNombres ? "" : `<th>Notas</th>${cols.map(c => `<th title="${esc(c.nombre)}">${esc(abrevCurso(c.nombre))}</th>`).join("")}<th>${esUni() ? "Prom. ponderado" : "Promedio"}</th><th>Estado</th>`) +
     `${acciones ? "<th></th>" : ""}</tr></thead><tbody>` +
     lista.map(e => { const d = perfilDe(e.docente_id), i = instDe(e.institucion_id);
-      return `<tr><td><div class="who">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div>${esc(e.nombre)}<small>${esc(e.codigo)}${carreraDe(e.carrera_id) ? " · " + esc(carreraDe(e.carrera_id).nombre) : ""}</small></div></div></td>
+      return `<tr><td><div class="who">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div>${esc(e.nombre)}<small>${esc(e.codigo)}${carreraDe(e.carrera_id) ? " · " + esc(carreraDe(e.carrera_id).nombre) + " · Ciclo " + e.ciclo : ""}</small></div></div></td>
       ${verInst ? `<td>${i ? esc(i.nombre) : "—"}</td>` : ""}${verDoc ? `<td>${d ? esc(nombreCompleto(d)) : "<small>Sin docente</small>"}</td>` : ""}` +
       (soloNombres ? "" : `<td>${e.totalNotas()}</td>${cols.map(c => `<td>${e.deCurso(c.id).length ? fmt(e.promedioCurso(c.id)) : "<small>–</small>"}</td>`).join("")}
       <td><b>${fmt(e.promedio())}</b></td><td>${pill(e)}</td>`) +
@@ -807,7 +807,7 @@ function vMis() {
   const e = est.find(x => x.perfil_id === yo.id);
   if (!e) return `<div class="card"><h2>Mis notas</h2><div class="empty">Tu cuenta aún no tiene un registro de notas asociado.</div></div>`;
   const doc = perfilDe(yo.docente_id);
-  return `<div class="bar"><span class="chip on">${esc(yo.institucion.nombre)}</span>${doc ? `<span class="chip">Docente: ${esc(nombreCompleto(doc))}</span>` : ""}${carreraDe(e.carrera_id) ? `<span class="chip">${esc(carreraDe(e.carrera_id).nombre)}</span>` : ""}${selPeriodo()}</div>
+  return `<div class="bar"><span class="chip on">${esc(yo.institucion.nombre)}</span>${doc ? `<span class="chip">Docente: ${esc(nombreCompleto(doc))}</span>` : ""}${carreraDe(e.carrera_id) ? `<span class="chip">${esc(carreraDe(e.carrera_id).nombre)} · Ciclo ${e.ciclo}</span>` : ""}${selPeriodo()}</div>
     <div class="kpis"><div class="kpi"><span>${esUni() ? "Promedio ponderado" : "Promedio general"}</span><b>${e.totalNotas() ? fmt(e.promedio()) : "—"}</b></div>
     <div class="kpi"><span>Notas registradas</span><b>${e.totalNotas()}</b></div><div class="kpi"><span>Estado</span><b style="font-size:20px">${pill(e)}</b></div></div>
     <div class="card"><h2>Mis calificaciones por curso</h2>${detalleTabla(e)}</div>`;
@@ -942,7 +942,7 @@ function vSolicitudes() {
 }
 /* ===== Registro de varias cuentas a la vez (nombre completo + correo personal por línea) ===== */
 let invModo = "uno";   // "uno" | "masivo"
-const nuevoMasivo = (ant = {}) => ({ inst: ant.inst || null, rol: ant.rol || "alumno", docente: ant.docente || "", orden: ant.orden || "nombres", carrera: ant.carrera || "", texto: "", filas: null, resultados: null });
+const nuevoMasivo = (ant = {}) => ({ inst: ant.inst || null, rol: ant.rol || "alumno", docente: ant.docente || "", orden: ant.orden || "nombres", carrera: ant.carrera || "", ciclo: ant.ciclo || "1", texto: "", filas: null, resultados: null });
 let masivo = nuevoMasivo();
 const PARTICULAS = new Set(["de", "del", "la", "las", "los", "y", "san", "santa", "da", "di", "van", "von"]);
 const sinTildes = s => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -994,6 +994,7 @@ function vMasivo() {
     <div class="row2">${yo.rol === "dueno" ? `<label>Institución<select name="inst" id="mInst">${insts.map(i => `<option value="${i.id}" ${i.id === instId ? "selected" : ""}>${esc(i.nombre)}</option>`).join("")}</select></label>` : ""}
     <label>Rol<select name="rol" id="mRol">${rolesOpc.map(r => `<option value="${r}" ${masivo.rol === r ? "selected" : ""}>${ROL[r]}</option>`).join("")}</select></label></div>
     ${masivo.rol === "alumno" && uniM ? `<label>Carrera de estos alumnos<select name="carrera" id="mCar"><option value="">Elige la carrera</option>${carrerasDe(instId).map(c => `<option value="${c.id}" ${String(c.id) === String(masivo.carrera) ? "selected" : ""}>${esc(c.nombre)} (${c.ciclos} ciclos)</option>`).join("")}</select></label>` : ""}
+    ${masivo.rol === "alumno" && uniM && masivo.carrera && carreraDe(Number(masivo.carrera)) ? `<label>Ciclo en que ingresan (se inscriben solos en los cursos de ese ciclo)<select name="ciclo" id="mCiclo">${[...Array(carreraDe(Number(masivo.carrera)).ciclos)].map((_, i) => `<option value="${i + 1}" ${String(i + 1) === String(masivo.ciclo || "1") ? "selected" : ""}>Ciclo ${i + 1}</option>`).join("")}</select></label>` : ""}
     ${yo.rol === "docente" || pcM ? "" : `<label id="mDocWrap" style="${masivo.rol === "alumno" ? "" : "display:none"}">Docente de estos alumnos<select name="docente" id="mDoc">${docs.map(d => `<option value="${d.id}" ${d.id === masivo.docente ? "selected" : ""}>${esc(nombreCompleto(d))}</option>`).join("") || "<option value=''>(no hay docentes)</option>"}</select></label>`}
     <label>Cómo vienen escritos los nombres<select name="orden"><option value="nombres" ${masivo.orden === "nombres" ? "selected" : ""}>Nombres y luego apellidos (Juan Carlos Pérez Gómez)</option><option value="apellidos" ${masivo.orden === "apellidos" ? "selected" : ""}>Apellidos y luego nombres (Pérez Gómez Juan Carlos)</option></select></label>
     <label>Lista (máx. 300 personas)<textarea name="texto" id="masTexto" rows="9" placeholder="Juan Carlos Pérez Gómez, juan.perez@gmail.com&#10;Ana María Torres Ruiz, ana.torres@gmail.com" spellcheck="false">${esc(masivo.texto)}</textarea></label>
@@ -1034,6 +1035,7 @@ function vInvitar(pre = {}) {
     <div class="row2"><label>Nombres<input name="nombres" required></label><label>Apellidos<input name="apellidos"></label></div>
     <label>Correo personal (opcional: ahí se envían las credenciales)<input type="email" name="correo" autocomplete="off" placeholder="nombre@gmail.com"></label>
     <label id="invCarWrap" style="display:none">Carrera<select name="carrera"><option value="">Elige la carrera</option></select></label>
+    <label id="invCicloWrap" style="display:none">Ciclo en que ingresa (se inscribe solo en los cursos de ese ciclo)<select name="ciclo"><option value="1">Ciclo 1</option></select></label>
     ${yo.rol === "docente" ? "" : `<label id="invDocWrap">Docente (para alumnos)<select name="docente">${docs.map(d => `<option value="${d.id}">${esc(nombreCompleto(d))}</option>`).join("") || "<option value=''>(no hay docentes)</option>"}</select></label>`}
     <div class="err" id="err"></div><div><button class="btn">${yo.rol === "dueno" || !pre.rol || pre.rol === "alumno" ? "Registrar" : "Crear cuenta"}</button></div></form></div>`;
 }
@@ -1138,7 +1140,7 @@ function tabAlumnosCar(c) {
   const al = est.filter(e => e.carrera_id === c.id), sin = est.filter(e => !e.carrera_id), propios = new Set(cursos.filter(x => x.carrera_id === c.id).map(x => x.id));
   return `<div class="card"><h2>Alumnos de ${esc(c.nombre)} <small>${al.length}</small></h2>
     <div class="bar"><button class="btn" data-a="car-reg-alumno">＋ Registrar alumno</button><button class="btn sec" data-a="car-reg-varios">＋ Registrar varios a la vez</button><button class="btn sec" data-a="car-ir-insc">Inscribir en cursos</button></div>
-    ${al.length ? `<div class="scroll"><table><thead><tr><th>Alumno</th><th>Cursos inscritos</th><th></th></tr></thead><tbody>` + al.map(e => `<tr><td><div class="who">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div>${esc(e.nombre)}<small>${esc(e.codigo)}</small></div></div></td><td>${inscr.filter(x => x.estudiante_id === e.id && (propios.has(x.curso_id))).length} de ${propios.size}</td>
+    ${al.length ? `<div class="scroll"><table><thead><tr><th>Alumno</th><th>Ciclo</th><th>Cursos inscritos</th><th></th></tr></thead><tbody>` + al.map(e => `<tr><td><div class="who">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div>${esc(e.nombre)}<small>${esc(e.codigo)}</small></div></div></td><td>${e.ciclo}</td><td>${inscr.filter(x => x.estudiante_id === e.id && (propios.has(x.curso_id))).length} de ${propios.size}</td>
       <td><button class="btn sm sec" data-a="ver" data-id="${e.id}">Ver / editar</button> <button class="btn sm sec" data-a="ir-insc" data-id="${e.id}">Inscripciones</button></td></tr>`).join("") + `</tbody></table></div>` : `<div class="empty">Aún no hay alumnos en esta carrera.</div>`}
     ${sin.length ? `<details class="acc" style="margin-top:14px"><summary><span>Alumnos sin carrera</span><small>${sin.length}</small></summary><div class="cuerpo"><div class="chips">${sin.map(e => `<label class="chk"><input type="checkbox" data-selsin="${e.id}">${esc(e.nombre)} <small>${esc(e.codigo)}</small></label>`).join("")}</div>
       <div class="bar" style="margin-top:10px"><button class="btn" data-a="car-agregar-alumnos">Añadir los marcados a ${esc(c.nombre)}</button></div></div></details>` : ""}</div>`;
@@ -1209,7 +1211,7 @@ function vInscripciones() {
   const csF = cs.filter(c => !insc.carrera || String(c.carrera_id) === insc.carrera);
   const op = c => `<option value="${c.id}" ${String(c.id) === insc.curso ? "selected" : ""}>${uni && c.ciclo ? "C" + c.ciclo + " · " : ""}${esc(c.nombre)}</option>`;
   const optCursos = uni ? gruposCursos(csF).map(g => `<optgroup label="${esc(g.titulo)}">${g.lista.map(op).join("")}</optgroup>`).join("") : csF.map(op).join("");
-  return tabs + `<div class="card"><h2>Inscribir alumnos en un curso</h2><div class="bar">${uni ? `<select id="iCar"><option value="">Todas las carreras</option>${cars.map(c => `<option value="${c.id}" ${String(c.id) === insc.carrera ? "selected" : ""}>${esc(c.nombre)}</option>`).join("")}</select>` : ""}
+  return tabs + `<div class="card"><h2>Inscribir alumnos en un curso</h2><p style="margin-top:0;color:var(--mute)">Los alumnos se inscriben <b>solos</b> en los cursos de su carrera y ciclo (en colegio secundaria, en todos). Aquí puedes ajustar o inscribir a alguien en otros cursos.</p><div class="bar">${uni ? `<select id="iCar"><option value="">Todas las carreras</option>${cars.map(c => `<option value="${c.id}" ${String(c.id) === insc.carrera ? "selected" : ""}>${esc(c.nombre)}</option>`).join("")}</select>` : ""}
     <select id="iCur"><option value="">Elige el curso…</option>${optCursos}</select><input id="inscFiltro" placeholder="Filtrar alumnos" value="${esc(insc.filtro)}"></div>
     <div class="bar"><button class="btn" data-a="insc-aplicar" data-m="1">Inscribir marcados</button><button class="btn del" data-a="insc-aplicar" data-m="0">Quitar marcados</button></div>
     <div id="inscTabla">${tablaInscCurso()}</div></div>`;
@@ -1401,7 +1403,7 @@ function renderDetalle() {
   const e = est.find(x => x.id === detalleId); if (!e) { cerrarDlg(); return; }
   const staff = esStaff(), eNotas = staff && permisos.editar_notas, eDatos = staff && permisos.editar_estudiantes, eDel = staff && permisos.eliminar;
   const doc = perfilDe(e.docente_id), docs = yo.rol === "admin" ? docentesDe(yo.institucion.id) : [];
-  abrirDlg(`<div class="dhead">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div><b>${esc(e.nombre)}</b><small>${esc(e.codigo)}${carreraDe(e.carrera_id) ? " · " + esc(carreraDe(e.carrera_id).nombre) : ""}${porCursoInst(e.institucion_id) ? "" : " · Docente: " + (doc ? esc(nombreCompleto(doc)) : "—")}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>
+  abrirDlg(`<div class="dhead">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div><b>${esc(e.nombre)}</b><small>${esc(e.codigo)}${carreraDe(e.carrera_id) ? " · " + esc(carreraDe(e.carrera_id).nombre) + " · Ciclo " + e.ciclo : ""}${porCursoInst(e.institucion_id) ? "" : " · Docente: " + (doc ? esc(nombreCompleto(doc)) : "—")}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>
     <div class="bar">${selPeriodo()}</div>
     <div class="scroll"><table><thead><tr><th>Curso</th><th>Calificaciones</th><th>${esUni() ? "Prom. ponderado" : "Promedio"}</th></tr></thead><tbody>` +
     (cursosDeEst(e).map(c => { const v = e.deCurso(c.id);
@@ -1411,7 +1413,7 @@ function renderDetalle() {
     <p style="margin:12px 0 0">${esUni() ? "Promedio ponderado" : "Promedio general"}${periodoSel ? ` (${esc(periodoDe(periodoSel).nombre)})` : ""}: <b>${e.totalNotas() ? fmt(e.promedio()) : "—"}</b> · ${pill(e)}</p>` +
     (eDatos ? `<hr style="border:0;border-top:1px solid var(--line);margin:14px 0"><form class="bar" id="fEstDet"><input name="codigo" value="${esc(e.codigo)}" required style="width:130px"><input name="nombre" value="${esc(e.nombre)}" required style="flex:1;min-width:180px"><button class="btn sm">Guardar datos</button></form><div class="err" id="errDet"></div>` : `<div class="err" id="errDet"></div>`) +
     (yo.rol === "admin" && !porCursoInst(e.institucion_id) ? `<div class="bar"><select id="selDoc"><option value="">Sin docente</option>${docs.map(d => `<option value="${d.id}" ${d.id === e.docente_id ? "selected" : ""}>${esc(nombreCompleto(d))}</option>`).join("")}</select><button class="btn sm sec" data-a="reasignar">Cambiar docente</button></div>` : "") +
-    (yo.rol === "admin" && porCursoInst(e.institucion_id) ? `<div class="bar">${esUni() ? `<select id="selCarrera"><option value="">Sin carrera</option>${carrerasDe(yo.institucion.id).map(c => `<option value="${c.id}" ${c.id === e.carrera_id ? "selected" : ""}>${esc(c.nombre)}</option>`).join("")}</select><button class="btn sm sec" data-a="cambiar-carrera">Cambiar carrera</button>` : ""}<button class="btn sm sec" data-a="ir-insc" data-id="${e.id}">Inscripciones del alumno</button></div>` : "") +
+    (yo.rol === "admin" && porCursoInst(e.institucion_id) ? `<div class="bar">${esUni() ? `<select id="selCarrera"><option value="">Sin carrera</option>${carrerasDe(yo.institucion.id).map(c => `<option value="${c.id}" ${c.id === e.carrera_id ? "selected" : ""}>${esc(c.nombre)}</option>`).join("")}</select><select id="selCiclo" title="Ciclo actual del alumno">${[...Array((carreraDe(e.carrera_id) || { ciclos: 14 }).ciclos)].map((_, i) => `<option value="${i + 1}" ${e.ciclo === i + 1 ? "selected" : ""}>Ciclo ${i + 1}</option>`).join("")}</select><button class="btn sm sec" data-a="cambiar-carrera">Cambiar carrera / ciclo</button>` : ""}<button class="btn sm sec" data-a="ir-insc" data-id="${e.id}">Inscripciones del alumno</button></div>` : "") +
     (eDel ? `<button class="btn del" data-a="borrar-est-det">Eliminar estudiante</button>` : ""));
 }
 // Formulario para agregar (id = null, con el curso elegido) o editar una calificación del estudiante abierto
@@ -1530,7 +1532,7 @@ const acciones = {
   "ir-insc"(d) { insc.modo = "alumno"; insc.alumno = String(d.id); cerrarDlg(); irA("inscripciones"); },
   async "cambiar-carrera"() {
     const v = $("#selCarrera").value; if (!v) { toast("Elige una carrera."); return; }
-    await rpc("cambiar_carrera_estudiante", { p_est: detalleId, p_carrera: Number(v) }); await recargarTodo(); renderDetalle(); toast("Carrera actualizada.");
+    await rpc("cambiar_carrera_estudiante", { p_est: detalleId, p_carrera: Number(v), p_ciclo: Number($("#selCiclo").value) }); await recargarTodo(); renderDetalle(); toast("Listo: carrera y ciclo actualizados; el alumno se inscribió en los cursos de ese ciclo.");
   },
   "inv-modo"(d) { invModo = d.id; conTransicion(render); },
   async "inst-dominio"(d) {
@@ -1556,7 +1558,7 @@ const acciones = {
       for (let i = 0; i < validas.length; i += 20) {   // por tandas de 20: la base limita cada llamada y el envío de correos va escalonado
         const lote = validas.slice(i, i + 20); prog(`Creando ${Math.min(i + 20, validas.length)} de ${validas.length}…`);
         const r = await rpc("crear_invitaciones_masivo", { p_items: lote.map(f => ({ nombres: f.nombres, ap1: f.ap1, ap2: f.ap2, correo: f.correo })),
-          p_rol: masivo.rol, p_docente: masivo.rol === "alumno" && masivo.docente ? masivo.docente : null, p_institucion: yo.rol === "dueno" ? instMasivo() : null, p_carrera: masivo.rol === "alumno" && masivo.carrera ? Number(masivo.carrera) : null });
+          p_rol: masivo.rol, p_docente: masivo.rol === "alumno" && masivo.docente ? masivo.docente : null, p_institucion: yo.rol === "dueno" ? instMasivo() : null, p_carrera: masivo.rol === "alumno" && masivo.carrera ? Number(masivo.carrera) : null, p_ciclo: Number(masivo.ciclo) || 1 });
         r.forEach((x, k) => res.push({ ...x, correo_personal: x.correo_personal || lote[k].correo }));
       }
     } catch (e) { toast("Se interrumpió: " + e.message + ". Revisa «Cuentas pendientes de activar»."); }
@@ -1703,6 +1705,10 @@ function actualizarFormInvitar() {
   if (cw) {
     const actual = f.carrera.value; cw.style.display = alumno && uni ? "" : "none"; f.carrera.required = alumno && uni;
     f.carrera.innerHTML = `<option value="">Elige la carrera</option>` + carrerasDe(instId).map(c => `<option value="${c.id}">${esc(c.nombre)} (${c.ciclos} ciclos)</option>`).join(""); f.carrera.value = carreraPre || actual;
+    const car = carreraDe(Number(f.carrera.value)), actualC = f.ciclo.value;
+    $("#invCicloWrap").style.display = alumno && uni && car ? "" : "none";   // el ciclo se elige después de la carrera
+    f.ciclo.innerHTML = car ? [...Array(car.ciclos)].map((_, i) => `<option value="${i + 1}">Ciclo ${i + 1}</option>`).join("") : `<option value="1">Ciclo 1</option>`;
+    f.ciclo.value = actualC || "1";
   }
 }
 
@@ -1759,7 +1765,13 @@ document.addEventListener("change", ev => {
   else if (t.id === "iCar") { insc.carrera = t.value; insc.curso = ""; render(); }
   else if (t.id === "iCur") { insc.curso = t.value; render(); }
   else if (t.id === "iAlumno") { const cod = t.value.split(" — ")[0].trim().toUpperCase(), e = est.find(x => x.codigo.toUpperCase() === cod); insc.alumno = e ? String(e.id) : ""; render(); }
-  else if (t.id === "mCar") masivo.carrera = t.value;
+  else if (t.id === "mCar") { masivo.texto = $("#masTexto").value; masivo.orden = $("#fMas").orden.value; masivo.carrera = t.value; masivo.ciclo = "1"; render(); }
+  else if (t.id === "mCiclo") masivo.ciclo = t.value;
+  else if (t.name === "carrera" && t.closest("#fInv")) actualizarFormInvitar();
+  else if (t.id === "selCarrera") {
+    const car = carreraDe(Number(t.value)), sc = $("#selCiclo"), actual = sc.value;
+    sc.innerHTML = [...Array(car ? car.ciclos : 14)].map((_, i) => `<option value="${i + 1}">Ciclo ${i + 1}</option>`).join(""); sc.value = actual;
+  }
   else if (t.matches && t.matches("[data-selall]")) document.querySelectorAll("#inscTabla [data-selest]").forEach(x => { x.checked = t.checked; });
   else if (t.dataset && t.dataset.asig !== undefined) {
     const [doc, cur] = t.dataset.asig.split("|"), marcado = t.checked, cid = Number(cur);
@@ -1827,7 +1839,7 @@ document.addEventListener("submit", ev => {
       await rpc("actualizar_permisos", { p_perfil: p.id, p_permisos: nuevos }); cerrarDlg(); await recargarTodo(); toast("Permisos guardados.");
     } else if (f.id === "fInv") {
       const v = await rpc("crear_invitacion", { p_rol: d.rol, p_nombres: d.nombres, p_apellidos: d.apellidos || "",
-        p_institucion: d.inst ? Number(d.inst) : null, p_docente: d.rol === "alumno" && d.docente && !porCursoInst(d.inst ? Number(d.inst) : yo.institucion.id) ? d.docente : null, p_correo: (d.correo || "").trim() || null, p_carrera: d.rol === "alumno" && d.carrera ? Number(d.carrera) : null });
+        p_institucion: d.inst ? Number(d.inst) : null, p_docente: d.rol === "alumno" && d.docente && !porCursoInst(d.inst ? Number(d.inst) : yo.institucion.id) ? d.docente : null, p_correo: (d.correo || "").trim() || null, p_carrera: d.rol === "alumno" && d.carrera ? Number(d.carrera) : null, p_ciclo: d.rol === "alumno" && d.ciclo ? Number(d.ciclo) : 1 });
       await recargarTodo(); mostrarCredenciales(v);
     } else if (f.id === "fInst") {
       if (d.workspace === "si" && !(d.dominio || "").trim()) falla("Si la institución ya tiene Google Workspace, escribe su dominio (por ejemplo midominio.edu).");
@@ -1839,15 +1851,15 @@ document.addEventListener("submit", ev => {
       await rpc("poner_mantenimiento", { p_activo: pausar, p_mensaje: d.mensaje || null });
       yo = await rpc("mi_sesion"); render(); toast(pausar ? "Sistema en pausa." : "Sistema reanudado.");
     } else if (f.id === "fCurso") {
-      await rpc("crear_curso", { p_nombre: d.nombre, p_carrera: d.carrera ? Number(d.carrera) : null, p_ciclo: d.ciclo ? Number(d.ciclo) : null }); await recargarTodo(); toast("Curso agregado.");
+      await rpc("crear_curso", { p_nombre: d.nombre, p_carrera: d.carrera ? Number(d.carrera) : null, p_ciclo: d.ciclo ? Number(d.ciclo) : null }); await recargarTodo(); toast(porCurso() ? "Curso agregado: los alumnos que le corresponden quedaron inscritos automáticamente." : "Curso agregado.");
     } else if (f.id === "fCursoCar") {
-      await rpc("crear_curso", { p_nombre: d.nombre, p_carrera: carreraSel, p_ciclo: d.ciclo ? Number(d.ciclo) : null }); await recargarTodo(); toast("Curso agregado a la carrera.");
+      await rpc("crear_curso", { p_nombre: d.nombre, p_carrera: carreraSel, p_ciclo: d.ciclo ? Number(d.ciclo) : null }); await recargarTodo(); toast(`Curso agregado: los alumnos del ciclo ${d.ciclo || ""} de esta carrera quedaron inscritos automáticamente.`);
     } else if (f.id === "fCarrera") {
       await rpc("crear_carrera", { p_nombre: d.nombre, p_ciclos: d.ciclos ? Number(d.ciclos) : null }); await recargarTodo(); toast("Carrera agregada.");
     } else if (f.id === "fPeriodo") {
       await rpc("crear_periodo", { p_nombre: d.nombre }); await recargarTodo(); toast("Agregado.");
     } else if (f.id === "fMas") {
-      Object.assign(masivo, { inst: d.inst || masivo.inst, rol: d.rol, docente: d.docente || "", carrera: d.carrera || "", orden: d.orden, texto: d.texto || "" });
+      Object.assign(masivo, { inst: d.inst || masivo.inst, rol: d.rol, docente: d.docente || "", carrera: d.carrera || "", ciclo: d.ciclo || "1", orden: d.orden, texto: d.texto || "" });
       const filas = parsearMasivo(masivo.texto, masivo.orden);
       if (!filas.length) falla("Pega al menos una línea con un nombre completo.");
       if (filas.length > 300) falla("Máximo 300 personas por vez: divide la lista.");
