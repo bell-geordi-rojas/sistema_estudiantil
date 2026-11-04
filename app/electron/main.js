@@ -22,7 +22,7 @@ function buscarActualizacion() {
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = false;
     autoUpdater.logger = null;
-    const espera = setTimeout(() => salir("tiempo"), 10000);   // sin respuesta: se sigue (solo vale hasta que empieza la descarga)
+    const espera = setTimeout(() => salir("tiempo"), 6000);   // sin respuesta: se sigue (solo vale hasta que empieza la descarga)
     autoUpdater.on("update-available", info => { clearTimeout(espera); estado("Descargando la versión " + info.version + "…", 0); });
     autoUpdater.on("download-progress", p => estado("Descargando la actualización…", Math.round(p.percent)));
     autoUpdater.on("update-downloaded", () => {
@@ -38,10 +38,12 @@ function buscarActualizacion() {
 
 async function crear() {
   Menu.setApplicationMenu(null);
+  // Abre ya las conexiones al sistema y a la base de datos mientras se busca la actualización
+  try { const s = require("electron").session.defaultSession; s.preconnect({ url: ORIGEN, numSockets: 2 }); s.preconnect({ url: "https://tikpnokwqkofitguvpdx.supabase.co", numSockets: 4 }); } catch {}
   win = new BrowserWindow({
     width: 1280, height: 800, minWidth: 900, minHeight: 600,
     title: "Estudiantil", icon: path.join(__dirname, "icon.png"), backgroundColor: "#0f1420", autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false },
   });
   // La web reconoce esta marca (y la versión instalada) para no ofrecer la descarga dentro del programa
   // y para exigir la actualización cuando haya una versión nueva que este programa no pudo instalar solo

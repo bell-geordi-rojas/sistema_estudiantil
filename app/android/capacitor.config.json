@@ -10,6 +10,7 @@
   },
   "android": {
     "appendUserAgent": "EstudiantilApp",
-    "allowMixedContent": false
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
   }
 }

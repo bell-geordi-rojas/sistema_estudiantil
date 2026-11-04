@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sistema Estudiantil</title>
+<link rel="preconnect" href="https://tikpnokwqkofitguvpdx.supabase.co" crossorigin>
 <link rel="icon" href="logo.png" type="image/png">
 <link rel="apple-touch-icon" href="logo.png">
 <script>
@@ -27,7 +28,7 @@ try { document.documentElement.dataset.efectos = localStorage.getItem("efectos")
 }
 *{box-sizing:border-box}
 body{margin:0;font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
-header{background:var(--teal);color:#fff;min-height:56px;display:flex;align-items:center;padding:6px 20px;gap:14px;flex-wrap:wrap;position:sticky;top:0;z-index:30;view-transition-name:cabecera}
+header{background:var(--teal);color:#fff;min-height:56px;display:flex;align-items:center;padding:6px 20px;gap:14px;flex-wrap:wrap;position:sticky;top:0;z-index:30}
 .logo{font-weight:800;font-size:20px;letter-spacing:.5px;display:flex;align-items:center;gap:8px}
 .logo i{width:28px;height:28px;border-radius:50%;background:#fff;display:inline-block;position:relative}
 .logo i::after{content:"";position:absolute;inset:7px;border-radius:50%;background:#1f6feb}
@@ -40,13 +41,13 @@ header .sp{flex:1}
 .av.big{width:84px;height:84px;font-size:28px}
 .av{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:700;font-size:12px;flex:none}
 .layout{display:grid;grid-template-columns:220px 1fr;min-height:calc(100vh - 56px)}
-nav{view-transition-name:barra;background:var(--side);border-right:1px solid var(--line);padding:14px 10px}
+nav{background:var(--side);border-right:1px solid var(--line);padding:14px 10px}
 nav button{display:flex;width:100%;gap:10px;align-items:center;border:0;background:none;padding:10px 12px;border-radius:8px;font:inherit;color:var(--ink);cursor:pointer;text-align:left;margin-bottom:2px}
 nav button:hover{background:var(--hover)}
 nav button.on{background:var(--violet-l);color:var(--nav-on);font-weight:600}
 nav .sep{border:0;border-top:1px solid var(--line);margin:10px 0}
 nav .badge{margin-left:auto;background:var(--red);color:#fff;border-radius:10px;padding:0 7px;font-size:11px;font-weight:700}
-main{padding:20px 24px;min-width:0;view-transition-name:contenido}
+main{padding:20px 24px;min-width:0}
 .bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center}
 .chip{background:var(--card);border:1px solid var(--line);padding:7px 14px;border-radius:8px;font-size:13px}
 .chip.on{background:var(--chip-on);border-color:var(--chip-bd)}
@@ -118,8 +119,8 @@ dialog[data-estrecho]{width:min(380px,92vw)}
   dialog::backdrop{-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
   .menupop,.cmenu{background:color-mix(in srgb,var(--card) 86%,transparent);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
   .toast{background:rgba(17,24,39,.82);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
-  .cstar{-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
 }
+@media(max-width:900px){header{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}}   /* el desenfoque del encabezado pesa en teléfonos: ahí va sólido */
 .btn:hover:not(:disabled){transform:scale(1.045)}
 .hbtn:hover{transform:scale(1.07)}
 nav button:hover{transform:translateX(4px) scale(1.035)}
@@ -128,16 +129,23 @@ nav button:hover{transform:translateX(4px) scale(1.035)}
 .av.big[data-a]{cursor:zoom-in}
 .ccard:hover{transform:translateY(-3px) scale(1.035);z-index:3}
 .cstar:hover{transform:scale(1.2)}
-dialog[open]:not([data-vt]){animation:dlgIn .26s cubic-bezier(.2,.8,.2,1)}
-dialog[open]::backdrop{animation:bdIn .26s ease}
-@keyframes dlgIn{from{opacity:0;transform:translateY(16px) scale(.96);filter:blur(8px)}to{opacity:1;transform:none;filter:none}}
+dialog[open]:not([data-vt]){animation:dlgIn .18s cubic-bezier(.2,.8,.2,1)}
+dialog[open]::backdrop{animation:bdIn .18s ease}
+@keyframes dlgIn{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}
 @keyframes bdIn{from{opacity:0}to{opacity:1}}
-::view-transition-group(root){animation-duration:.25s}
-::view-transition-old(contenido){animation:vtOut .22s ease both}
-::view-transition-new(contenido){animation:vtIn .3s ease both}
-@keyframes vtOut{to{opacity:0;filter:blur(8px);transform:scale(.985)}}
-@keyframes vtIn{from{opacity:0;filter:blur(8px);transform:scale(1.015)}}
-::view-transition-group(banner-curso),::view-transition-group(foto-perfil){animation-duration:.42s;animation-timing-function:cubic-bezier(.2,.8,.2,1)}
+/* Cambio de pantalla: solo el contenido se funde (los nombres se activan durante la transición, no siempre, para no capturar capas de más) */
+html.vt-pagina header{view-transition-name:cabecera}
+html.vt-pagina nav{view-transition-name:barra}
+html.vt-pagina main{view-transition-name:contenido}
+::view-transition-group(*){animation-duration:.14s}
+::view-transition-old(contenido){animation:vtOut .12s ease both}
+::view-transition-new(contenido){animation:vtIn .18s ease both}
+@keyframes vtOut{to{opacity:0;transform:scale(.992)}}
+@keyframes vtIn{from{opacity:0;transform:scale(1.008)}}
+/* Ventana que crece desde su tarjeta: el resto de la pantalla cambia al instante y solo se anima el elemento compartido */
+:root:not(.vt-pagina)::view-transition-old(root){display:none}
+:root:not(.vt-pagina)::view-transition-new(root){animation:none;mix-blend-mode:normal}
+::view-transition-group(banner-curso),::view-transition-group(foto-perfil){animation-duration:.26s;animation-timing-function:cubic-bezier(.2,.8,.2,1)}
 ::view-transition-old(banner-curso),::view-transition-new(banner-curso),::view-transition-old(foto-perfil),::view-transition-new(foto-perfil){height:100%;width:100%;object-fit:cover}
 :root[data-efectos=off] *,:root[data-efectos=off] ::before,:root[data-efectos=off] ::after{animation:none!important;transition:none!important}
 :root[data-efectos=off] ::view-transition-group(*),:root[data-efectos=off] ::view-transition-old(*),:root[data-efectos=off] ::view-transition-new(*){animation:none!important}
@@ -302,7 +310,9 @@ function fijarSesion(j) {
   guardarLocal("sesion", JSON.stringify(sesion));
 }
 function cerrarSesionLocal() { sesion = null; guardarLocal("sesion", null); }
-async function refrescar() {
+let refrescando = null;
+const refrescar = () => (refrescando = refrescando || refrescarSesion().finally(() => { refrescando = null; }));
+async function refrescarSesion() {
   if (!sesion || !sesion.refresh_token) throw new Error("Tu sesión expiró. Inicia sesión de nuevo.");
   const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
     method: "POST", headers: { apikey: SUPABASE_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ refresh_token: sesion.refresh_token }) });
@@ -402,32 +412,46 @@ const instDe = id => insts.find(i => i.id === id);
 
 const SEL_EST = "estudiantes?select=id,codigo,nombre,docente_id,perfil_id,institucion_id,notas(id,curso_id,periodo_id,nota,peso,titulo,notas_detalle(comentario))&order=id";
 async function recargarEst() { est = (await sel(SEL_EST)).map(d => new Estudiante(d)); }
-async function cargarDatos() {
-  const gest = puedeGestionar();
-  const [e, p, i, s, v, cu, pe] = await Promise.all([
-    sel(SEL_EST),
-    sel("perfiles?select=id,usuario,nombres,apellidos,rol,institucion_id,docente_id,permisos,activo&order=creado"),
-    yo.rol === "dueno" || yo.rol === "admin" ? sel("instituciones?select=*&order=nombre") : Promise.resolve([]),
-    gest ? sel("solicitudes?select=*&estado=eq.pendiente&order=creado") : Promise.resolve([]),
-    gest ? sel("invitaciones?select=id,rol,nombres,apellidos,usuario,institucion_id,docente_id,creado&usado=eq.false&order=creado.desc") : Promise.resolve([]),
-    sel("cursos?select=id,institucion_id,nombre,orden&order=orden,id"),
-    sel("periodos?select=id,institucion_id,nombre,orden&order=orden,id"),
+// Consultas que no dependen del rol (la base ya filtra por cuenta): se lanzan a la vez que mi_sesion al entrar
+const consultasComunes = () => Promise.all([
+  sel(SEL_EST),
+  sel("perfiles?select=id,usuario,nombres,apellidos,rol,institucion_id,docente_id,permisos,activo&order=creado"),
+  sel("cursos?select=id,institucion_id,nombre,orden&order=orden,id"),
+  sel("periodos?select=id,institucion_id,nombre,orden&order=orden,id"),
+]);
+// Consultas que dependen del rol; al entrar se lanzan todas por adelantado (la base solo entrega lo que la cuenta puede ver)
+// y luego se descarta lo que no corresponde al rol, así no hay que esperar a conocer el rol para pedirlas.
+const consultasRol = () => Promise.all([
+  sel("instituciones?select=*&order=nombre").catch(() => []),
+  sel("solicitudes?select=*&estado=eq.pendiente&order=creado").catch(() => []),
+  sel("invitaciones?select=id,rol,nombres,apellidos,usuario,institucion_id,docente_id,creado&usado=eq.false&order=creado.desc").catch(() => []),
+]);
+async function cargarDatos(adelantadas) {
+  const gest = puedeGestionar(), verInst = yo.rol === "dueno" || yo.rol === "admin";
+  const sin = [], nada = Promise.resolve([]);
+  const [[e, p, cu, pe], [i, s, v]] = await Promise.all(adelantadas || [
+    consultasComunes(),
+    Promise.all([verInst ? sel("instituciones?select=*&order=nombre") : nada, gest ? sel("solicitudes?select=*&estado=eq.pendiente&order=creado") : nada,
+      gest ? sel("invitaciones?select=id,rol,nombres,apellidos,usuario,institucion_id,docente_id,creado&usado=eq.false&order=creado.desc") : nada]),
   ]);
+  const i2 = verInst ? i : sin, s2 = gest ? s : sin, v2 = gest ? v : sin;
   cursos = cu; periodos = pe;
   if (periodoSel && !periodos.some(x => x.id === periodoSel)) periodoSel = null;
-  est = e.map(d => new Estudiante(d)); perfiles = p; insts = i; solic = s; invs = v;
+  est = e.map(d => new Estudiante(d)); perfiles = p; insts = i2; solic = s2; invs = v2;
 }
 async function recargarTodo() { await cargarDatos(); render(); }
 
 async function entrar() {
+  if (sesion && Date.now() > sesion.expires_at) await refrescar();   // token vigente antes de lanzar peticiones en paralelo
+  const adelantadas = [consultasComunes(), consultasRol()]; adelantadas.forEach(x => x.catch(() => {}));   // se piden a la vez que la sesión: un viaje de red menos
   yo = await rpc("mi_sesion");
   if (!yo) { cerrarSesionLocal(); throw new Error("Tu cuenta no tiene un perfil asignado. Contacta a tu administrador."); }
   permisos = yo.permisos || {};
   avisoCarga = ""; periodoSel = null;
-  if (yo.acceso) { try { await cargarDatos(); } catch (e) { avisoCarga = e.message; } }
+  if (yo.acceso) { try { await cargarDatos(adelantadas); } catch (e) { avisoCarga = e.message; } }
   vista = "panel";
   if (yo.foto && FOTO_OK.test(yo.foto)) fotos[yo.id] = yo.foto;
-  if (yo.acceso) cargarFotos();
+  if (yo.acceso) setTimeout(cargarFotos, 400);   // después de pintar la pantalla, para no competir con la carga principal
 }
 async function cargarFotos() {
   try {
@@ -639,7 +663,9 @@ function descargasHTML() {
 function vDescargar() { return `<div class="card" style="max-width:680px"><h2>Descargar el sistema</h2>${descargasHTML()}</div>`; }
 /* ===== Cursos en tarjetas (con banner de patrón) ===== */
 const PALETA = ["#a594f9", "#0d82d8", "#ff7aa8", "#5aa9f0", "#7566e0", "#f9c85f", "#34c3a0", "#f08a5d"];
-function bannerCurso(id) {
+const cacheBanner = new Map();
+const bannerCurso = id => cacheBanner.get(id) || (cacheBanner.set(id, dibujarBanner(id)), cacheBanner.get(id));
+function dibujarBanner(id) {
   let s = (id * 9301 + 49297) % 233280; const r = () => (s = (s * 9301 + 49297) % 233280) / 233280;
   const col = PALETA[id % PALETA.length], tipo = (id + Math.floor(id / PALETA.length)) % 5, tono = () => (r() < .5 ? "#fff" : "#000"), op = () => (r() * .2).toFixed(2);
   let f = "";
@@ -936,9 +962,11 @@ const hayTransiciones = () => !!document.startViewTransition && efectosActivos()
 function unaVez(fn) { let hecho = false; return () => { if (hecho) return; hecho = true; fn(); }; }
 function conTransicion(fn) {
   if (!hayTransiciones()) { fn(); return; }
+  const raiz = document.documentElement, quitar = () => raiz.classList.remove("vt-pagina");
+  raiz.classList.add("vt-pagina");
   const f = unaVez(fn), t = document.startViewTransition(f);
-  t.ready.catch(() => {}); t.finished.catch(() => {}); t.updateCallbackDone.catch(e => console.error(e));
-  setTimeout(f, 1200);
+  t.ready.catch(() => {}); t.finished.then(quitar, quitar); t.updateCallbackDone.catch(e => console.error(e));
+  setTimeout(() => { f(); quitar(); }, 1200);   // red de seguridad
 }let compartidoAct = null;   // {sel, nombre}: elemento de la pantalla al que la ventana abierta "vuelve" al cerrarse
 function abrirDlg(html, opc = {}) {
   $("#dlgBody").innerHTML = html;
@@ -1177,11 +1205,14 @@ document.addEventListener("keydown", ev => {
   const c = t.dataset && (t.dataset.nota ?? t.dataset.titulo ?? t.dataset.coment);
   if (c !== undefined) { ev.preventDefault(); if (t.closest("#cursosCal")) agregarCal(Number(c)); else agregarBorrador(Number(c)); }
 });
-let tBusqueda;
+let tBusqueda, tFiltro;
 document.addEventListener("input", ev => {
   const t = ev.target;
   if (t.id === "calCodigo") { const e = calEstudiante(); if ((e ? e.id : null) !== calEstId) repintarCal(); }
-  else if (t.id === "flt") { filtro = t.value; const p = t.selectionStart; $("#main").innerHTML = vLista(); const f = $("#flt"); f.focus(); f.setSelectionRange(p, p); }
+  else if (t.id === "flt") {
+    filtro = t.value; clearTimeout(tFiltro);
+    tFiltro = setTimeout(() => { const p = t.selectionStart; $("#main").innerHTML = vLista(); const f = $("#flt"); f.focus(); f.setSelectionRange(p, p); }, 120);   // espera a que termines de escribir
+  }
   else if (t.id === "qInst") {
     clearTimeout(tBusqueda); instSel = null;
     tBusqueda = setTimeout(async () => {
