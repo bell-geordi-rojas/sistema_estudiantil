@@ -39,7 +39,7 @@ El instalador de Windows no tiene firma digital (SmartScreen avisa) y el APK est
 
 ### Correo institucional y envío de credenciales por Gmail
 
-- Cada institución puede tener un **dominio de correo** (p. ej. `uss.edu.pe`; lo define el dueño en «Instituciones» o el administrador en su pantalla de cursos). Con él, el usuario de una cuenta nueva se genera con el patrón institucional: inicial del 1.er apellido + 2.º apellido + inicial del nombre. «Bell Geordi Rojas Juarez» → `rjuarezb@uss.edu.pe`. Si ya existe se agrega un número. Se puede entrar escribiendo `rjuarezb` o el correo completo.
+- Cada institución puede tener un **dominio de correo** (p. ej. `midominio.edu`; lo define el dueño en «Instituciones» o el administrador en su pantalla de cursos). Con él, el usuario de una cuenta nueva se genera con el patrón institucional: inicial del 1.er apellido + 2.º apellido + inicial del nombre. «Juan Carlos Pérez Gómez» → `pgomezj@midominio.edu`. Si ya existe se agrega un número. Se puede entrar escribiendo `pgomezj` o el correo completo.
   > Es el *usuario dentro de este sistema* con formato de correo institucional: no crea un buzón real en Google Workspace (eso solo lo hace el área de TI de la universidad).
 - **Registrar varios a la vez:** en «Registrar estudiante → Varios a la vez» se pega una persona por línea (`nombre completo, correo personal`), se revisa la lista y se crean todas; las credenciales se envían a cada correo personal y se puede descargar un CSV de respaldo.
 - **Conectar Gmail (una sola vez):** el correo sale desde tu Gmail con un Google Apps Script que llama la base de datos (`pg_net`), así la clave de envío nunca llega al navegador.

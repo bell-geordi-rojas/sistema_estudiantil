@@ -357,7 +357,7 @@ async function http(ruta, { method = "GET", body, headers } = {}, reintento = fa
 }
 const rpc = (fn, args = {}) => http(`/rest/v1/rpc/${fn}`, { method: "POST", body: args });
 const sel = q => http(`/rest/v1/${q}`);
-// El usuario puede escribirse como «rjuarezb» o como su correo institucional «rjuarezb@uss.edu.pe»: solo cuenta lo anterior a la @
+// El usuario puede escribirse como «pgomezj» o como su correo institucional «pgomezj@midominio.edu»: solo cuenta lo anterior a la @
 const usuarioDe = u => String(u).trim().toLowerCase().split("@")[0];
 const emailDe = u => `${usuarioDe(u)}@${EMAIL_DOMINIO}`;   // correo interno con el que se registra en Supabase Auth
 
@@ -797,14 +797,14 @@ const sinTildes = s => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 const EMAIL_OK = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 // «de la Cruz» cuenta como una sola palabra: las partículas se pegan a la palabra que sigue
 function unidades(txt) { const u = []; let pend = []; for (const t of txt.split(/\s+/).filter(Boolean)) { if (PARTICULAS.has(t.toLowerCase())) pend.push(t); else { u.push([...pend, t].join(" ")); pend = []; } } if (pend.length) u.push(pend.join(" ")); return u; }
-// Separa «Bell Geordi Rojas Juarez» en nombres y 2 apellidos (o «Rojas Juarez Bell Geordi» si el orden es apellidos primero)
+// Separa «Juan Carlos Pérez Gómez» en nombres y 2 apellidos (o «Pérez Gómez Juan Carlos» si el orden es apellidos primero)
 function separarNombre(completo, orden) {
   const u = unidades(completo);
   if (u.length < 2) return null;
   if (orden === "apellidos") return u.length >= 3 ? { ap1: u[0], ap2: u[1], nombres: u.slice(2).join(" ") } : { ap1: u[0], ap2: "", nombres: u[1] };
   return u.length >= 3 ? { nombres: u.slice(0, -2).join(" "), ap1: u[u.length - 2], ap2: u[u.length - 1] } : { nombres: u[0], ap1: u[1], ap2: "" };
 }
-// Igual que la base de datos: inicial del 1er apellido + 2do apellido + inicial del nombre (rjuarezb); sin dominio: inicial + apellido
+// Igual que la base de datos: inicial del 1er apellido + 2do apellido + inicial del nombre (pgomezj); sin dominio: inicial + apellido
 function usuarioPrevio(f, conDominio) {
   const inicialAp = f.ap1.replace(/^((de|del|la|las|los|y|san|santa|da|di|van|von)\s+)+/i, "")[0] || f.ap1[0];   // la inicial ignora partículas (de la Cruz -> c)
   const base = conDominio && f.ap2 ? inicialAp + f.ap2 + f.nombres[0] : f.nombres[0] + f.ap1;
@@ -832,7 +832,7 @@ function vMasivo() {
   if (masivo.resultados) return resultadosMasivo();
   const rolesOpc = yo.rol === "dueno" ? ["admin", "docente", "alumno"] : yo.rol === "admin" ? ["docente", "alumno"] : ["alumno"];
   const instId = instMasivo(), docs = yo.rol === "docente" ? [] : docentesDe(instId), dom = dominioDe(instId);
-  const avisoDom = dom ? `<p class="msg">Correo institucional: <b>usuario@${esc(dom)}</b>, por ejemplo <b>rjuarezb@${esc(dom)}</b> para «Bell Geordi Rojas Juarez».</p>`
+  const avisoDom = dom ? `<p class="msg">Correo institucional: <b>usuario@${esc(dom)}</b>, por ejemplo <b>pgomezj@${esc(dom)}</b> para «Juan Carlos Pérez Gómez».</p>`
     : `<p class="msg warn">Esta institución aún no tiene dominio de correo institucional, así que los usuarios se generan sin él (inicial + apellido). Defínelo en ${yo.rol === "dueno" ? "«Instituciones»" : "«Cursos y trimestres»/«Administrar cursos»"}.</p>`;
   const avisoCorreo = yo.correo ? "" : `<p class="msg warn">El envío de correos aún no está conectado a Gmail: las cuentas se crearán igual y podrás descargar un CSV con las credenciales (mira «Conectar Gmail» en el README).</p>`;
   return `<div class="card"><h2>Registrar varios a la vez</h2>
@@ -841,8 +841,8 @@ function vMasivo() {
     <div class="row2">${yo.rol === "dueno" ? `<label>Institución<select name="inst" id="mInst">${insts.map(i => `<option value="${i.id}" ${i.id === instId ? "selected" : ""}>${esc(i.nombre)}</option>`).join("")}</select></label>` : ""}
     <label>Rol<select name="rol" id="mRol">${rolesOpc.map(r => `<option value="${r}" ${masivo.rol === r ? "selected" : ""}>${ROL[r]}</option>`).join("")}</select></label></div>
     ${yo.rol === "docente" ? "" : `<label id="mDocWrap" style="${masivo.rol === "alumno" ? "" : "display:none"}">Docente de estos alumnos<select name="docente" id="mDoc">${docs.map(d => `<option value="${d.id}" ${d.id === masivo.docente ? "selected" : ""}>${esc(nombreCompleto(d))}</option>`).join("") || "<option value=''>(no hay docentes)</option>"}</select></label>`}
-    <label>Cómo vienen escritos los nombres<select name="orden"><option value="nombres" ${masivo.orden === "nombres" ? "selected" : ""}>Nombres y luego apellidos (Bell Geordi Rojas Juarez)</option><option value="apellidos" ${masivo.orden === "apellidos" ? "selected" : ""}>Apellidos y luego nombres (Rojas Juarez Bell Geordi)</option></select></label>
-    <label>Lista (máx. 300 personas)<textarea name="texto" id="masTexto" rows="9" placeholder="Bell Geordi Rojas Juarez, bell@gmail.com&#10;Ana María Pérez López, ana.perez@gmail.com" spellcheck="false">${esc(masivo.texto)}</textarea></label>
+    <label>Cómo vienen escritos los nombres<select name="orden"><option value="nombres" ${masivo.orden === "nombres" ? "selected" : ""}>Nombres y luego apellidos (Juan Carlos Pérez Gómez)</option><option value="apellidos" ${masivo.orden === "apellidos" ? "selected" : ""}>Apellidos y luego nombres (Pérez Gómez Juan Carlos)</option></select></label>
+    <label>Lista (máx. 300 personas)<textarea name="texto" id="masTexto" rows="9" placeholder="Juan Carlos Pérez Gómez, juan.perez@gmail.com&#10;Ana María Torres Ruiz, ana.torres@gmail.com" spellcheck="false">${esc(masivo.texto)}</textarea></label>
     <div class="bar"><button type="button" class="btn sec" data-a="mas-archivo">📎 Cargar un archivo CSV o TXT</button></div>
     <div class="err"></div><div><button class="btn">Revisar la lista</button></div></form></div>${masivo.filas ? vistaPreviaMasivo(dom) : ""}`;
 }
@@ -852,7 +852,7 @@ function vistaPreviaMasivo(dom) {
     masivo.filas.map(f => `<tr style="${f.error ? "background:var(--warn-bg)" : ""}"><td>${f.n}</td><td>${esc(f.nombres)}</td><td>${esc((f.ap1 + " " + f.ap2).trim())}</td>
       <td>${f.error ? "—" : `<code>${esc(usuarioPrevio(f, !!dom))}${dom ? "@" + esc(dom) : ""}</code>`}</td><td>${f.correo ? esc(f.correo) : "<small>sin correo</small>"}</td>
       <td>${f.error ? `<span class="pill no" style="white-space:normal">${esc(f.error)}</span>` : `<span class="pill ok">Lista</span>`}</td></tr>`).join("") + `</tbody></table></div>
-    <p style="color:var(--mute);font-size:13px">Si un usuario ya existe se le agrega un número (rjuarezb2). Las líneas con error se omiten: corrígelas arriba y vuelve a revisar.</p>
+    <p style="color:var(--mute);font-size:13px">Si un usuario ya existe se le agrega un número (pgomezj2). Las líneas con error se omiten: corrígelas arriba y vuelve a revisar.</p>
     <div class="bar"><button class="btn" data-a="mas-crear" ${validas.length ? "" : "disabled"}>Crear ${validas.length} cuenta(s)${yo.correo ? " y enviar las credenciales" : ""}</button><span id="masProg" style="color:var(--mute)"></span></div></div>`;
 }
 function resultadosMasivo() {
@@ -896,13 +896,13 @@ function vMantenimiento() {
 function vInstituciones() {
   const crear = yo.rol === "dueno" ? vMantenimiento() + `<div class="card"><h2>Nueva institución afiliada</h2><form class="bar" id="fInst">
       <input name="nombre" placeholder="Nombre (p. ej. María Auxiliadora)" required style="flex:1;min-width:220px">
-      <input name="dominio" placeholder="Dominio de correo (ej. uss.edu.pe)" style="min-width:210px" autocapitalize="none">
+      <input name="dominio" placeholder="Dominio de correo (ej. midominio.edu)" style="min-width:210px" autocapitalize="none">
       <select name="tipo" title="Tipo de institución"><option value="colegio">Colegio (trimestres)</option><option value="universidad">Universidad (ciclos y notas con peso)</option></select>
       <label style="display:flex;gap:6px;align-items:center">Vence <input type="date" name="vence"></label><button class="btn">Crear</button></form><div class="err"></div></div>` : "";
   const tabla = insts.length ? `<div class="scroll"><table><thead><tr><th>Institución</th><th>Tipo</th><th>Correo institucional</th><th>Carpeta</th><th>Docentes</th><th>Estudiantes</th><th>Vence</th><th>Estado</th><th></th></tr></thead><tbody>` +
     insts.map(i => { const c = conteoInst(i), vencida = i.vence && i.vence < new Date().toISOString().slice(0, 10);
       return `<tr><td><b>${esc(i.nombre)}</b></td><td><span class="tag">${i.tipo === "universidad" ? "Universidad" : "Colegio"}</span></td>
-      <td style="white-space:nowrap"><input id="dom${i.id}" value="${esc(i.dominio || "")}" placeholder="uss.edu.pe" style="width:130px" autocapitalize="none"> <button class="btn sm sec" data-a="inst-dominio" data-id="${i.id}">Guardar</button></td><td><code>Admin/${esc(i.slug)}</code></td><td>${c.docentes}</td><td>${c.estudiantes}</td>
+      <td style="white-space:nowrap"><input id="dom${i.id}" value="${esc(i.dominio || "")}" placeholder="midominio.edu" style="width:130px" autocapitalize="none"> <button class="btn sm sec" data-a="inst-dominio" data-id="${i.id}">Guardar</button></td><td><code>Admin/${esc(i.slug)}</code></td><td>${c.docentes}</td><td>${c.estudiantes}</td>
       <td><input type="date" id="vence${i.id}" value="${esc(i.vence || "")}"></td>
       <td><span class="pill ${i.activa && !vencida ? "ok" : "no"}">${!i.activa ? "Suspendida" : vencida ? "Vencida" : "Activa"}</span></td>
       <td style="white-space:nowrap"><button class="btn sm sec" data-a="inst-guardar" data-id="${i.id}">Guardar fecha</button>
@@ -925,8 +925,8 @@ function vConfig() {
     <p style="margin-top:0;color:var(--mute)">Las notas se registran dentro de un ${nomPeriodo(tipo).toLowerCase()}. Quitar uno borra también sus notas (siempre debe quedar al menos uno).</p>
     <form class="bar" id="fPeriodo"><input name="nombre" placeholder="${tipo === "universidad" ? "p. ej. Ciclo 2026-II" : "p. ej. Trimestre 4"}" maxlength="40" required style="flex:1;min-width:220px"><button class="btn">Agregar ${nomPeriodo(tipo).toLowerCase()}</button></form><div class="err"></div>
     <div class="scroll"><table><tbody>${ps.map(p => filaItem("periodo", p)).join("")}</tbody></table></div></div>` : "";
-  const domCard = yo.rol === "admin" ? `<div class="card"><h2>Correo institucional</h2><p style="margin-top:0;color:var(--mute)">Dominio de los correos de tu institución (por ejemplo <code>uss.edu.pe</code>). Con él, el usuario de cada cuenta nueva se genera como <b>rjuarezb@uss.edu.pe</b> (inicial del 1.er apellido + 2.º apellido + inicial del nombre).</p>
-    <form class="bar" id="fDominio"><input name="dominio" value="${esc(yo.institucion.dominio || "")}" placeholder="uss.edu.pe" autocapitalize="none" style="flex:1;min-width:220px"><button class="btn">Guardar dominio</button></form><div class="err"></div></div>` : "";
+  const domCard = yo.rol === "admin" ? `<div class="card"><h2>Correo institucional</h2><p style="margin-top:0;color:var(--mute)">Dominio de los correos de tu institución (por ejemplo <code>midominio.edu</code>). Con él, el usuario de cada cuenta nueva se genera como <b>pgomezj@midominio.edu</b> (inicial del 1.er apellido + 2.º apellido + inicial del nombre).</p>
+    <form class="bar" id="fDominio"><input name="dominio" value="${esc(yo.institucion.dominio || "")}" placeholder="midominio.edu" autocapitalize="none" style="flex:1;min-width:220px"><button class="btn">Guardar dominio</button></form><div class="err"></div></div>` : "";
   return domCard + cursosCard + perCard;
 }
 function vCarpetas() {
@@ -989,7 +989,7 @@ function cabecera(conUsuario, menu = "") {
 function pantallaLogin() {
   const t = (id, txt) => `<button class="${tabLogin === id ? "on" : ""}" data-a="tab" data-id="${id}">${txt}</button>`;
   let cuerpo;
-  if (tabLogin === "ingresar") cuerpo = `<form class="form" id="fLogin" style="max-width:none"><label>Usuario o correo institucional<input name="usuario" required autocomplete="username" autocapitalize="none" placeholder="p. ej. rjuarezb o rjuarezb@uss.edu.pe"></label>
+  if (tabLogin === "ingresar") cuerpo = `<form class="form" id="fLogin" style="max-width:none"><label>Usuario o correo institucional<input name="usuario" required autocomplete="username" autocapitalize="none" placeholder="tu usuario o tu correo institucional"></label>
     <label>Contraseña<input type="password" name="clave" required autocomplete="current-password"></label><div class="err" id="err"></div><button class="btn">Ingresar</button></form>`;
   else if (tabLogin === "activar") cuerpo = `<form class="form" id="fActivar" style="max-width:none"><p style="margin:0;color:var(--mute)">Usa el usuario y el código que te entregó tu institución y crea tu contraseña.</p>
     <label>Usuario o correo institucional<input name="usuario" required autocapitalize="none" autocomplete="username"></label><label>Código de activación<input name="codigo" required autocapitalize="characters" autocomplete="off"></label>

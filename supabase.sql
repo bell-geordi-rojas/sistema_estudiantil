@@ -53,7 +53,7 @@ create table if not exists instituciones (
   vence date,                                -- fin del alquiler (null = sin vencimiento)
   creado timestamptz not null default now()
 );
-alter table instituciones add column if not exists dominio text      -- dominio del correo institucional, p. ej. uss.edu.pe
+alter table instituciones add column if not exists dominio text      -- dominio del correo institucional, p. ej. midominio.edu
   check (dominio is null or dominio ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$');
 alter table instituciones add column if not exists tipo text not null default 'colegio' check (tipo in ('colegio', 'universidad'));
 
@@ -506,7 +506,7 @@ declare base text; u text; n int := 1; v_dom text; a1 text; a2 text; ap text := 
 begin
   select dominio into v_dom from instituciones where id = p_inst;
   if v_dom is not null then
-    -- Patron institucional (ej. Bell Geordi Rojas Juarez -> rjuarezb): inicial del 1er apellido + 2do apellido + inicial del nombre
+    -- Patron institucional (ej. Juan Carlos Pérez Gómez -> pgomezj): inicial del 1er apellido + 2do apellido + inicial del nombre
     a1 := coalesce(nullif(trim(p_ap1), ''), split_part(ap, ' ', 1));
     a2 := coalesce(nullif(trim(p_ap2), ''), nullif(trim(substr(ap, length(split_part(ap, ' ', 1)) + 1)), ''));
     -- la inicial del apellido ignora particulas (de la Cruz -> c)
@@ -717,14 +717,14 @@ begin
   return v_id;
 end $$;
 
--- Dominio del correo institucional (p. ej. uss.edu.pe): lo define el dueno o el administrador de esa institucion
+-- Dominio del correo institucional (p. ej. midominio.edu): lo define el dueno o el administrador de esa institucion
 create or replace function actualizar_dominio(p_inst bigint, p_dominio text) returns void
 language plpgsql security definer set search_path = public as $$
 begin
   if not (mi_rol() = 'dueno' or (mi_rol() = 'admin' and p_inst = mi_inst())) then raise exception 'No autorizado.'; end if;
   p_dominio := regexp_replace(lower(trim(coalesce(p_dominio, ''))), '^@', '');
   if p_dominio <> '' and p_dominio !~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$' then
-    raise exception 'Dominio invalido (ejemplo: uss.edu.pe).';
+    raise exception 'Dominio invalido (ejemplo: midominio.edu).';
   end if;
   update instituciones set dominio = nullif(p_dominio, '') where id = p_inst;
   if not found then raise exception 'Institucion no encontrada.'; end if;
