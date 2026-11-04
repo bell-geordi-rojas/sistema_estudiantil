@@ -69,6 +69,10 @@ create table if not exists perfiles (
   check ((rol = 'dueno') = (institucion_id is null))
 );
 
+-- Foto de perfil: imagen JPEG pequena (la web la reduce a 192x192) guardada como data URL
+alter table perfiles add column if not exists foto text
+  check (foto is null or (length(foto) <= 45000 and foto ~ '^data:image/jpeg;base64,[A-Za-z0-9+/=]+$'));
+
 create table if not exists estudiantes (
   id bigint generated always as identity primary key,
   institucion_id bigint not null references instituciones (id) on delete cascade,
@@ -453,7 +457,7 @@ begin
     v_ok := false; v_motivo := 'La afiliacion de tu institucion vencio.';
   end if;
   return jsonb_build_object(
-    'id', p.id, 'usuario', p.usuario, 'nombres', p.nombres, 'apellidos', p.apellidos, 'rol', p.rol,
+    'id', p.id, 'usuario', p.usuario, 'nombres', p.nombres, 'apellidos', p.apellidos, 'rol', p.rol, 'foto', p.foto,
     'docente_id', p.docente_id, 'acceso', v_ok, 'motivo', v_motivo,
     'mantenimiento', en_mantenimiento(), 'mensaje_mantenimiento', (select valor from config where clave = 'mantenimiento_msg'),
     'institucion', case when i.id is null then null
@@ -464,6 +468,27 @@ end $$;
 -- ---------------------------------------------------------------------------
 -- 8. Cuentas e instituciones
 -- ---------------------------------------------------------------------------
+-- Cualquier cuenta puede cambiar su propio nombre y su foto (si es alumno, tambien cambia su nombre en la lista de estudiantes)
+create or replace function actualizar_mi_perfil(p_nombres text, p_apellidos text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if mi_rol() is null then raise exception 'No autorizado.'; end if;
+  p_nombres := trim(coalesce(p_nombres, ''));
+  p_apellidos := trim(coalesce(p_apellidos, ''));
+  if p_nombres = '' or p_nombres ~ '[0-9|]' or p_apellidos ~ '[0-9|]' or length(p_nombres || p_apellidos) > 100 then
+    raise exception 'Escribe tus nombres y apellidos (sin numeros).';
+  end if;
+  update perfiles set nombres = p_nombres, apellidos = p_apellidos where id = auth.uid();
+  update estudiantes set nombre = trim(p_nombres || ' ' || p_apellidos) where perfil_id = auth.uid();
+end $$;
+
+create or replace function actualizar_mi_foto(p_foto text default null) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if mi_rol() is null then raise exception 'No autorizado.'; end if;
+  update perfiles set foto = nullif(trim(coalesce(p_foto, '')), '') where id = auth.uid();
+end $$;
+
 create or replace function _generar_usuario(p_nombres text, p_apellidos text) returns text language plpgsql set search_path = public as $$
 declare base text; u text; n int := 1;
 begin
@@ -904,7 +929,7 @@ begin
              'cambiar_rol', 'eliminar_cuenta', 'regenerar_codigo', 'eliminar_invitacion', 'registrar_estudiante', 'actualizar_estudiante', 'reasignar_docente',
              'eliminar_estudiante', 'agregar_nota', 'actualizar_nota', 'eliminar_nota',
              'cambiar_tipo_institucion', 'eliminar_institucion', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
-             'crear_periodo', 'renombrar_periodo', 'eliminar_periodo'])
+             'crear_periodo', 'renombrar_periodo', 'eliminar_periodo', 'actualizar_mi_perfil', 'actualizar_mi_foto'])
   loop
     execute format('revoke all on function %s from public, anon', f);
     execute format('grant execute on function %s to authenticated', f);

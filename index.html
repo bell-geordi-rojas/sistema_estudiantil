@@ -35,6 +35,7 @@ header .sp{flex:1}
 .user small{display:block;opacity:.85;font-size:11px}
 .hbtn{background:rgba(255,255,255,.18);color:#fff;border:0;border-radius:8px;padding:7px 12px;font:inherit;cursor:pointer}
 .hbtn:hover{background:rgba(255,255,255,.3)}
+.av.big{width:84px;height:84px;font-size:28px}
 .av{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:700;font-size:12px;flex:none}
 .layout{display:grid;grid-template-columns:220px 1fr;min-height:calc(100vh - 56px)}
 nav{background:var(--side);border-right:1px solid var(--line);padding:14px 10px}
@@ -125,6 +126,23 @@ dialog::backdrop{background:rgba(10,14,24,.55)}
 .tabs button{flex:1;border:0;background:none;padding:8px;border-radius:7px;font:inherit;color:var(--mute);cursor:pointer;font-weight:600}
 .tabs button.on{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
 .dl{border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px;background:var(--side)}
+.cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:20px}
+.ccard{position:relative;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);cursor:pointer;transition:.15s}
+.ccard:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(0,0,0,.25)}
+.banw{border-radius:9px 9px 0 0;overflow:hidden;line-height:0}
+.ban{width:100%;height:126px;display:block}
+.cb{padding:14px 14px 4px;flex:1}
+.ct{color:var(--violet-ink);font-weight:600;line-height:1.35}
+.cs{margin-top:10px;font-size:13px;text-transform:uppercase;letter-spacing:.3px}
+.ci{margin-top:6px;color:var(--mute);font-size:12px}
+.cstar{position:absolute;top:10px;right:10px;width:32px;height:32px;border-radius:50%;border:0;background:rgba(0,0,0,.28);color:#fff;font-size:18px;line-height:1;cursor:pointer}
+.cstar.on{color:#ffd34d}
+.cm{position:relative;display:flex;justify-content:flex-end;padding:0 10px 8px}
+.cm .mini{font-size:20px;opacity:.8;padding:4px 8px}
+.cmenu{display:none;position:absolute;right:10px;bottom:38px;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 26px rgba(0,0,0,.35);min-width:170px;padding:5px;z-index:20}
+.cmenu.open{display:block}
+.cmenu button{display:block;width:100%;text-align:left;border:0;background:none;color:var(--ink);font:inherit;padding:9px 10px;border-radius:7px;cursor:pointer}
+.cmenu button:hover{background:var(--hover)}
 .res{display:grid;gap:6px;margin-top:6px}
 .res button{text-align:left;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:9px 12px;border-radius:8px;font:inherit;cursor:pointer}
 .res button.on{border-color:var(--teal);background:var(--chip-on)}
@@ -218,7 +236,9 @@ const nombreValido = n => n !== "" && !n.includes("|") && !/\d/.test(n);
 const codigoValido = c => c !== "" && c.length <= 15 && /^[A-Za-z0-9]+$/.test(c);
 const nombreCompleto = p => `${p.nombres} ${p.apellidos || ""}`.trim();
 const COLORS = ["#e08a5c", "#8b3df0", "#0e9aa7", "#1f6feb", "#10b981", "#d946ef"];
-const avatarDe = (texto, clave) => { let h = 0; for (const c of String(clave)) h += c.charCodeAt(0);
+const FOTO_OK = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/;
+let fotos = {};   // id de perfil -> foto (data URL); se carga aparte para no frenar la carga de datos
+const avatarDe = (texto, clave, pid) => { const f = pid && fotos[pid]; if (f && FOTO_OK.test(f)) return `<div class="av" style="background:url(${f}) center/cover"></div>`; let h = 0; for (const c of String(clave)) h += c.charCodeAt(0);
   const ini = String(texto).split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join("").toUpperCase();
   return `<div class="av" style="background:${COLORS[h % COLORS.length]}">${esc(ini)}</div>`; };
 let tt; function toast(m) { const t = $("#toast"); t.textContent = m; t.classList.add("show"); clearTimeout(tt); tt = setTimeout(() => t.classList.remove("show"), 3200); }
@@ -328,7 +348,7 @@ const miCursos = () => yo && yo.institucion ? cursosDe(yo.institucion.id) : [];
 const misPeriodos = () => yo && yo.institucion ? periodosDe(yo.institucion.id) : [];
 const nomPeriodos = tipo => tipo === "universidad" ? "ciclos" : "trimestres";   // nombre del periodo según el tipo de institución
 const nomPeriodo = tipo => tipo === "universidad" ? "Ciclo" : "Trimestre";
-const tituloConfig = () => esUni() ? "Cursos" : `Cursos y ${nomPeriodos(yo.institucion.tipo)}`;   // las universidades tienen 14 ciclos fijos
+const tituloConfig = () => esUni() ? "Administrar cursos" : `Cursos y ${nomPeriodos(yo.institucion.tipo)}`;   // las universidades tienen 14 ciclos fijos
 const puedeCursos = () => !!yo && (yo.rol === "admin" || (yo.rol === "docente" && permisos.gestionar_cursos));
 const esStaff = () => yo && (yo.rol === "admin" || yo.rol === "docente");
 const puedeGestionar = () => yo && (yo.rol === "dueno" || yo.rol === "admin" || (yo.rol === "docente" && permisos.gestionar_alumnos));
@@ -363,10 +383,18 @@ async function entrar() {
   avisoCarga = ""; periodoSel = null;
   if (yo.acceso) { try { await cargarDatos(); } catch (e) { avisoCarga = e.message; } }
   vista = "panel";
+  if (yo.foto && FOTO_OK.test(yo.foto)) fotos[yo.id] = yo.foto;
+  if (yo.acceso) cargarFotos();
+}
+async function cargarFotos() {
+  try {
+    const m = {}; for (const x of await sel("perfiles?select=id,foto&foto=not.is.null")) if (FOTO_OK.test(x.foto)) m[x.id] = x.foto;
+    if (JSON.stringify(Object.keys(m).sort()) !== JSON.stringify(Object.keys(fotos).sort())) { fotos = m; if (yo && !actualizacion && !$("#dlg").open) render(); } else fotos = m;
+  } catch {}
 }
 function salir() {
   if (sesion) fetch(`${SUPABASE_URL}/auth/v1/logout`, { method: "POST", headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${sesion.access_token}` } }).catch(() => {});
-  cerrarSesionLocal(); yo = null; permisos = {}; est = []; perfiles = []; insts = []; solic = []; invs = []; cursos = []; periodos = []; periodoSel = null; tabLogin = "ingresar"; render();
+  cerrarSesionLocal(); yo = null; permisos = {}; est = []; perfiles = []; insts = []; solic = []; invs = []; cursos = []; periodos = []; fotos = {}; periodoSel = null; tabLogin = "ingresar"; render();
   cargarEstadoSistema();
 }
 async function cargarEstadoSistema() {
@@ -420,7 +448,7 @@ function filas(lista, { acciones = true, soloNombres = false } = {}) {
     (soloNombres ? "" : `<th>Notas</th>${cols.map(c => `<th title="${esc(c.nombre)}">${esc(abrevCurso(c.nombre))}</th>`).join("")}<th>${esUni() ? "Prom. ponderado" : "Promedio"}</th><th>Estado</th>`) +
     `${acciones ? "<th></th>" : ""}</tr></thead><tbody>` +
     lista.map(e => { const d = perfilDe(e.docente_id), i = instDe(e.institucion_id);
-      return `<tr><td><div class="who">${avatarDe(e.nombre, e.codigo)}<div>${esc(e.nombre)}<small>${esc(e.codigo)}</small></div></div></td>
+      return `<tr><td><div class="who">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div>${esc(e.nombre)}<small>${esc(e.codigo)}</small></div></div></td>
       ${verInst ? `<td>${i ? esc(i.nombre) : "—"}</td>` : ""}${verDoc ? `<td>${d ? esc(nombreCompleto(d)) : "<small>Sin docente</small>"}</td>` : ""}` +
       (soloNombres ? "" : `<td>${e.totalNotas()}</td>${cols.map(c => `<td>${e.deCurso(c.id).length ? fmt(e.promedioCurso(c.id)) : "<small>–</small>"}</td>`).join("")}
       <td><b>${fmt(e.promedio())}</b></td><td>${pill(e)}</td>`) +
@@ -516,6 +544,7 @@ async function agregarCal(c) {
 /* ===== Vistas ===== */
 function vistasDisponibles() {
   const r = yo.rol, p = permisos, v = [["panel", "▦", "Panel principal"]];
+  if (r !== "dueno") v.push(["cursos", "❖", r === "alumno" ? "Mis cursos" : "Cursos"]);
   if (r === "alumno") { v.push(["mis", "★", "Mis notas"]); v.push(["comentarios", "✎", "Mis comentarios"]); if (p.ver_companeros) v.push(["lista", "☰", "Mis compañeros"]); }
   else v.push(["lista", "☰", r === "dueno" ? "Estudiantes (lectura)" : "Estudiantes"]);
   if (esStaff() && p.registrar_estudiantes) v.push(["registrar", "＋", "Registrar estudiante"]);
@@ -566,6 +595,37 @@ function descargasHTML() {
       "Ejecuta <b>Estudiantil-Setup.exe</b>.", "Si Windows muestra «protegió su PC», pulsa <b>Más información</b> y luego <b>Ejecutar de todas formas</b> (el programa aún no tiene firma digital).", "Elige la carpeta, instala y abre <b>Estudiantil</b> desde el escritorio."]);
 }
 function vDescargar() { return `<div class="card" style="max-width:680px"><h2>Descargar el sistema</h2>${descargasHTML()}</div>`; }
+/* ===== Cursos en tarjetas (con banner de patrón) ===== */
+const PALETA = ["#a594f9", "#0d82d8", "#ff7aa8", "#5aa9f0", "#7566e0", "#f9c85f", "#34c3a0", "#f08a5d"];
+function bannerCurso(id) {
+  let s = (id * 9301 + 49297) % 233280; const r = () => (s = (s * 9301 + 49297) % 233280) / 233280;
+  const col = PALETA[id % PALETA.length], tipo = (id + Math.floor(id / PALETA.length)) % 5, tono = () => (r() < .5 ? "#fff" : "#000"), op = () => (r() * .2).toFixed(2);
+  let f = "";
+  if (tipo === 0) for (let i = 0; i < 6; i++) f += `<circle cx="${(r() * 400).toFixed(0)}" cy="${(r() * 126).toFixed(0)}" r="${(40 + r() * 40).toFixed(0)}" fill="none" stroke="#000" stroke-opacity=".12" stroke-width="${(14 + r() * 10).toFixed(0)}"/>`;
+  else if (tipo === 1) for (let y = -1; y < 4; y++) for (let x = -1; x < 9; x++) { const X = x * 50 + (y % 2 ? 25 : 0), Y = y * 40; f += `<rect x="${X}" y="${Y}" width="50" height="50" transform="rotate(45 ${X + 25} ${Y + 25})" fill="${tono()}" fill-opacity="${op()}"/>`; }
+  else if (tipo === 2) for (let y = 0; y < 3; y++) for (let x = 0; x < 8; x++) f += `<rect x="${x * 50}" y="${y * 42}" width="50" height="42" fill="${tono()}" fill-opacity="${op()}"/>`;
+  else if (tipo === 3) for (let y = 0; y < 3; y++) for (let x = 0; x < 8; x++) { const X = x * 50, Y = y * 42; f += `<polygon points="${X},${Y + 42} ${X + 50},${Y + 42} ${X + 25},${Y}" fill="${tono()}" fill-opacity="${op()}"/>`; }
+  else for (let i = 0; i < 5; i++) f += `<path d="M0 ${20 + i * 24} Q 100 ${(r() * 60 + i * 20).toFixed(0)} 200 ${20 + i * 24} T 400 ${20 + i * 24}" fill="none" stroke="#fff" stroke-opacity=".18" stroke-width="12"/>`;
+  return `<svg class="ban" viewBox="0 0 400 126" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="400" height="126" fill="${col}"/>${f}</svg>`;
+}
+const favoritos = () => { try { return JSON.parse(leerLocal("fav_" + yo.id) || "[]"); } catch { return []; } };
+function tarjetaCursoVista(c, favs) {
+  let info;
+  if (yo.rol === "alumno") { const e = est.find(x => x.perfil_id === yo.id), ns = e ? e.deCurso(c.id) : []; info = ns.length ? `Promedio <b>${fmt(mediaPond(ns))}</b> · ${ns.length} nota(s)` : "Sin notas aún"; }
+  else { const con = est.filter(e => e.deCurso(c.id).length); info = con.length ? `${con.length} estudiante(s) · prom. <b>${fmt(media(con.map(e => e.promedioCurso(c.id))))}</b>` : "Sin notas aún"; }
+  const sub = periodoSel ? periodoDe(periodoSel).nombre : `Todos los ${nomPeriodos(yo.institucion.tipo)}`, fav = favs.has(c.id);
+  return `<div class="ccard" data-a="curso-ver" data-id="${c.id}"><div class="banw">${bannerCurso(c.id)}</div>
+    <button class="cstar ${fav ? "on" : ""}" data-a="curso-fav" data-id="${c.id}" title="${fav ? "Quitar de favoritos" : "Marcar como favorito"}">${fav ? "★" : "☆"}</button>
+    <div class="cb"><div class="ct">${esc(c.nombre)}</div><div class="cs">${esc(sub)}</div><div class="ci">${info}</div></div>
+    <div class="cm"><button class="mini" data-a="curso-menu" data-id="${c.id}" title="Opciones" aria-label="Opciones del curso">⋮</button>
+      <div class="cmenu" id="cm${c.id}"><button data-a="curso-ver" data-id="${c.id}">${yo.rol === "alumno" ? "Ver mis notas" : "Ver estudiantes"}</button>${puedeCursos() ? `<button data-a="curso-ren" data-id="${c.id}">Renombrar</button><button data-a="curso-del" data-id="${c.id}">Quitar</button>` : ""}</div></div></div>`;
+}
+function vCursos() {
+  const cs = miCursos(), favs = new Set(favoritos()), orden = [...cs].sort((a, b) => (favs.has(b.id) ? 1 : 0) - (favs.has(a.id) ? 1 : 0));
+  return `<div class="bar"><span class="chip on">${esc(yo.institucion.nombre)}</span>${selPeriodo()}</div>` +
+    (cs.length ? `<div class="cgrid">${orden.map(c => tarjetaCursoVista(c, favs)).join("")}</div>`
+      : `<div class="card"><div class="empty">Aún no hay cursos${puedeCursos() ? `. Agrégalos en «${tituloConfig()}».` : "."}</div></div>`);
+}
 function vComentarios() {
   const e = est.find(x => x.perfil_id === yo.id);
   if (!e) return `<div class="card"><h2>Mis comentarios</h2><div class="empty">Tu cuenta aún no tiene un registro de notas asociado.</div></div>`;
@@ -624,7 +684,7 @@ function vUsuarios() {
   const verInst = yo.rol === "dueno";
   const tabla = lista.length ? `<div class="scroll"><table><thead><tr><th>Cuenta</th><th>Rol</th>${verInst ? "<th>Institución</th>" : ""}<th>Docente</th><th>Estado</th><th></th></tr></thead><tbody>` +
     lista.map(p => { const d = perfilDe(p.docente_id), i = instDe(p.institucion_id);
-      return `<tr><td><div class="who">${avatarDe(nombreCompleto(p), p.usuario)}<div>${esc(nombreCompleto(p))}<small>${esc(p.usuario)}</small></div></div></td>
+      return `<tr><td><div class="who">${avatarDe(nombreCompleto(p), p.usuario, p.id)}<div>${esc(nombreCompleto(p))}<small>${esc(p.usuario)}</small></div></div></td>
       <td><span class="tag">${ROL[p.rol]}</span></td>${verInst ? `<td>${i ? esc(i.nombre) : "—"}</td>` : ""}<td>${p.rol === "alumno" ? (d ? esc(nombreCompleto(d)) : "<small>—</small>") : "<small>—</small>"}</td>
       <td><span class="pill ${p.activo ? "ok" : "na"}">${p.activo ? "Activa" : "Desactivada"}</span></td>
       <td style="white-space:nowrap">${p.rol !== "admin" || yo.rol === "dueno" ? `<button class="btn sm sec" data-a="permisos" data-id="${p.id}">Permisos</button> ` : ""}
@@ -716,19 +776,46 @@ function vCarpetas() {
   return `<div class="card"><h2>Carpetas</h2><ul class="tree"><li><details open><summary>📁 <b>Admin</b> <small>${esc(nombreCompleto(yo))}</small></summary><ul>${arbol || "<li><small>Aún no hay instituciones.</small></li>"}</ul></details></li></ul></div>`;
 }
 function vCuenta() {
-  return `<div class="card"><h2>Mi cuenta</h2><p><b>${esc(nombreCompleto(yo))}</b> · <code>${esc(yo.usuario)}</code> · <span class="tag">${ROL[yo.rol]}</span><br>
-    <small>${yo.institucion ? esc(yo.institucion.nombre) + (yo.institucion.vence ? " · afiliación hasta " + esc(yo.institucion.vence) : "") : "Propietario del sistema"}</small></p>
-    <form class="form" id="fPass"><label>Nueva contraseña<input type="password" name="a" minlength="6" required autocomplete="new-password"></label>
+  const grande = avatarDe(nombreCompleto(yo), yo.usuario, yo.id).replace('class="av"', 'class="av big"'), tiene = !!fotos[yo.id];
+  return `<div class="card"><h2>Mi cuenta</h2><div class="who" style="gap:16px;align-items:center">${grande}<div><b>${esc(nombreCompleto(yo))}</b> · <code>${esc(yo.usuario)}</code> · <span class="tag">${ROL[yo.rol]}</span><br>
+    <small>${yo.institucion ? esc(yo.institucion.nombre) + (yo.institucion.vence ? " · afiliación hasta " + esc(yo.institucion.vence) : "") : "Propietario del sistema"}</small>
+    <div class="bar" style="margin:10px 0 0"><button class="btn sm sec" data-a="foto-elegir">📷 ${tiene ? "Cambiar foto" : "Subir foto"}</button>${tiene ? `<button class="btn del" data-a="foto-quitar">Quitar foto</button>` : ""}</div></div></div>
+    <input type="file" id="fotoIn" accept="image/*" hidden></div>
+    <div class="card"><h2>Mis datos</h2><form class="form" id="fPerfil"><div class="row2"><label>Nombres<input name="nombres" value="${esc(yo.nombres)}" required maxlength="80"></label>
+    <label>Apellidos<input name="apellidos" value="${esc(yo.apellidos || "")}" maxlength="80"></label></div>
+    ${yo.rol === "alumno" ? `<small>Tu nombre también se actualiza en la lista de estudiantes de tu docente.</small>` : ""}
+    <div class="err"></div><div><button class="btn">Guardar nombre</button></div></form></div>
+    <div class="card"><h2>Cambiar contraseña</h2><form class="form" id="fPass"><label>Nueva contraseña<input type="password" name="a" minlength="6" required autocomplete="new-password"></label>
     <label>Repite la contraseña<input type="password" name="b" minlength="6" required autocomplete="new-password"></label>
-    <div class="err" id="err"></div><div><button class="btn">Cambiar contraseña</button></div></form></div>`;
+    <div class="err"></div><div><button class="btn">Cambiar contraseña</button></div></form></div>`;
 }
-
+// Reduce la imagen elegida a un cuadrado de 192x192 (JPEG) para guardarla como foto de perfil
+function reducirFoto(archivo) {
+  return new Promise((res, rej) => {
+    const img = new Image(), url = URL.createObjectURL(archivo);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const S = 192, c = document.createElement("canvas"); c.width = c.height = S;
+      const g = c.getContext("2d"), m = Math.min(img.width, img.height);
+      g.fillStyle = "#fff"; g.fillRect(0, 0, S, S); g.drawImage(img, (img.width - m) / 2, (img.height - m) / 2, m, m, 0, 0, S, S);
+      let q = .85, d = c.toDataURL("image/jpeg", q); while (d.length > 40000 && q > .3) { q -= .1; d = c.toDataURL("image/jpeg", q); }
+      res(d);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("No se pudo leer esa imagen. Elige una foto JPG o PNG.")); };
+    img.src = url;
+  });
+}
+async function subirFoto(archivo) {
+  if (!archivo) return;
+  const d = await reducirFoto(archivo);
+  await rpc("actualizar_mi_foto", { p_foto: d }); fotos[yo.id] = d; yo.foto = d; render(); toast("Foto actualizada.");
+}
 /* ===== Pantallas ===== */
 function cabecera(conUsuario, menu = "") {
   const sub = yo && yo.institucion ? yo.institucion.nombre : "Propietario";
   return `<header><div class="logo"><i></i>ESTUDIANTIL</div><div class="sp"></div>
     <button class="hbtn" data-a="tema" title="Cambiar entre modo claro y oscuro">${temaActual() === "dark" ? "☀<span class=\"txt\"> Modo claro</span>" : "☾<span class=\"txt\"> Modo oscuro</span>"}</button>${menu ? `<div class="menuwrap"><button class="hbtn menubtn" data-a="menu" aria-label="Menú" title="Menú">⋮</button><div class="menupop" id="menuPop">${menu}</div></div>` : ""}
-    ${conUsuario ? `<div class="user">${avatarDe(nombreCompleto(yo), yo.usuario)}<div>${esc(nombreCompleto(yo))}<small>${ROL[yo.rol]} · ${esc(sub)}</small></div></div><button class="hbtn" data-a="salir">Salir</button>` : ""}</header>`;
+    ${conUsuario ? `<div class="user">${avatarDe(nombreCompleto(yo), yo.usuario, yo.id)}<div>${esc(nombreCompleto(yo))}<small>${ROL[yo.rol]} · ${esc(sub)}</small></div></div><button class="hbtn" data-a="salir">Salir</button>` : ""}</header>`;
 }
 function pantallaLogin() {
   const t = (id, txt) => `<button class="${tabLogin === id ? "on" : ""}" data-a="tab" data-id="${id}">${txt}</button>`;
@@ -774,7 +861,7 @@ function pantallaApp() {
   let cuerpo;
   if (avisoCarga) cuerpo = `<div class="card"><h2>No se pudieron cargar los datos</h2><p class="err">${esc(avisoCarga)}</p><button class="btn" data-a="reintentar">Reintentar</button></div>`;
   else cuerpo = { panel: vPanel, mis: vMis, lista: vLista, registrar: vRegistrar, calificar: vCalificar, buscar: vBuscar, estadisticas: vEstadisticas,
-    usuarios: vUsuarios, solicitudes: vSolicitudes, invitar: vInvitar, instituciones: vInstituciones, carpetas: vCarpetas, cuenta: vCuenta, config: vConfig, comentarios: vComentarios, descargar: vDescargar }[vista]();
+    usuarios: vUsuarios, solicitudes: vSolicitudes, invitar: vInvitar, instituciones: vInstituciones, carpetas: vCarpetas, cuenta: vCuenta, config: vConfig, comentarios: vComentarios, descargar: vDescargar, cursos: vCursos }[vista]();
   const aviso = yo.rol === "dueno" && yo.mantenimiento ? `<div class="msg warn" style="border-radius:0;text-align:center">⚠ El sistema está en mantenimiento: solo tú puedes usarlo. Reanúdalo en «Instituciones».</div>` : "";
   return `${cabecera(true, nav)}${aviso}<div class="layout"><nav>${nav}</nav><main id="main">${cuerpo}</main></div>`;
 }
@@ -805,7 +892,7 @@ function renderDetalle() {
   const e = est.find(x => x.id === detalleId); if (!e) { cerrarDlg(); return; }
   const staff = esStaff(), eNotas = staff && permisos.editar_notas, eDatos = staff && permisos.editar_estudiantes, eDel = staff && permisos.eliminar;
   const doc = perfilDe(e.docente_id), docs = yo.rol === "admin" ? docentesDe(yo.institucion.id) : [];
-  abrirDlg(`<div class="dhead">${avatarDe(e.nombre, e.codigo)}<div><b>${esc(e.nombre)}</b><small>${esc(e.codigo)} · Docente: ${doc ? esc(nombreCompleto(doc)) : "—"}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>
+  abrirDlg(`<div class="dhead">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div><b>${esc(e.nombre)}</b><small>${esc(e.codigo)} · Docente: ${doc ? esc(nombreCompleto(doc)) : "—"}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>
     <div class="bar">${selPeriodo()}</div>
     <div class="scroll"><table><thead><tr><th>Curso</th><th>Calificaciones</th><th>${esUni() ? "Prom. ponderado" : "Promedio"}</th></tr></thead><tbody>` +
     (cursosDe(e.institucion_id).map(c => { const v = e.deCurso(c.id);
@@ -851,6 +938,25 @@ function abrirPermisos(p) {
 const idNum = d => Number(d.id);
 const acciones = {
   menu() { $("#menuPop").classList.toggle("open"); },
+  "curso-menu"(d) { const m = $(`#cm${d.id}`); const abrir = !m.classList.contains("open"); document.querySelectorAll(".cmenu.open").forEach(x => x.classList.remove("open")); if (abrir) m.classList.add("open"); },
+  "curso-fav"(d) { const id = idNum(d), f = new Set(favoritos()); f.has(id) ? f.delete(id) : f.add(id); guardarLocal("fav_" + yo.id, JSON.stringify([...f])); render(); },
+  "curso-ver"(d) {
+    const c = cursoDe(idNum(d)); if (!c) return;
+    let cuerpo;
+    if (yo.rol === "alumno") {
+      const e = est.find(x => x.perfil_id === yo.id), ns = e ? e.deCurso(c.id) : [];
+      cuerpo = ns.length ? `<div class="scroll"><table><thead><tr><th>${nomPeriodo(yo.institucion.tipo)}</th><th>Nombre</th><th>Nota</th>${esUni() ? "<th>Peso</th>" : ""}<th>Comentario</th></tr></thead><tbody>` +
+        ns.map(n => `<tr><td>${esc((periodoDe(n.periodo) || {}).nombre || "—")}</td><td>${n.titulo ? esc(n.titulo) : "<small>—</small>"}</td><td><span class="note">${n.v}</span></td>${esUni() ? `<td>${n.peso}</td>` : ""}<td>${n.comentario ? esc(n.comentario) : "<small>—</small>"}</td></tr>`).join("") +
+        `</tbody></table></div><p style="margin:12px 0 0">${esUni() ? "Promedio ponderado" : "Promedio"} del curso: <b>${fmt(mediaPond(ns))}</b></p>` : `<div class="empty">Aún no tienes notas en este curso.</div>`;
+    } else {
+      cuerpo = est.length ? `<div class="scroll"><table><thead><tr><th>Estudiante</th><th>Notas</th><th>Promedio</th><th></th></tr></thead><tbody>` +
+        est.map(e => { const ns = e.deCurso(c.id); return `<tr><td><div class="who">${avatarDe(e.nombre, e.codigo, e.perfil_id)}<div>${esc(e.nombre)}<small>${esc(e.codigo)}</small></div></div></td><td>${ns.length}</td><td>${ns.length ? `<b>${fmt(mediaPond(ns))}</b>` : "–"}</td>
+          <td><button class="btn sm sec" data-a="ver" data-id="${e.id}">Ver / editar</button></td></tr>`; }).join("") + `</tbody></table></div>` : `<div class="empty">No hay estudiantes todavía.</div>`;
+    }
+    abrirDlg(`<div class="banw" style="margin:-18px -18px 14px">${bannerCurso(c.id)}</div><div class="dhead"><div><b>${esc(c.nombre)}</b><small>${esc(periodoSel ? periodoDe(periodoSel).nombre : "Todos los " + nomPeriodos(yo.institucion.tipo))}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>${cuerpo}`);
+  },
+  "foto-elegir"() { $("#fotoIn").click(); },
+  async "foto-quitar"() { await rpc("actualizar_mi_foto", { p_foto: null }); delete fotos[yo.id]; yo.foto = null; render(); toast("Foto quitada."); },
   async tema() { setTema(temaActual() === "dark" ? "light" : "dark"); render(); if (detalleId) renderDetalle(); },
   async salir() { cerrarDlg(); salir(); },
   async tab(d) { tabLogin = d.id; instSel = null; render(); },
@@ -961,6 +1067,7 @@ function actualizarFormInvitar() {
 }
 
 document.addEventListener("click", async ev => {
+  document.querySelectorAll(".cmenu.open").forEach(m => { if (!m.closest(".cm").contains(ev.target)) m.classList.remove("open"); });
   if (!ev.target.closest(".menubtn")) { const pop = $("#menuPop"); if (pop) pop.classList.remove("open"); }
   const b = ev.target.closest("[data-v],[data-a]"); if (!b) return;
   if (b.dataset.v) { irA(b.dataset.v); return; }
@@ -995,6 +1102,7 @@ document.addEventListener("change", ev => {
   else if (t.id === "invRol" || t.id === "invInst") actualizarFormInvitar();
   else if (t.id === "perSel") { periodoSel = t.value ? Number(t.value) : null; render(); if (detalleId) renderDetalle(); }
   else if (t.id === "perCal") repintarCal();
+  else if (t.id === "fotoIn") subirFoto(t.files[0]).catch(e => toast(e.message));
 });
 
 /* ===== Formularios ===== */
@@ -1062,6 +1170,9 @@ document.addEventListener("submit", ev => {
       await rpc("crear_curso", { p_nombre: d.nombre }); await recargarTodo(); toast("Curso agregado.");
     } else if (f.id === "fPeriodo") {
       await rpc("crear_periodo", { p_nombre: d.nombre }); await recargarTodo(); toast("Agregado.");
+    } else if (f.id === "fPerfil") {
+      await rpc("actualizar_mi_perfil", { p_nombres: d.nombres, p_apellidos: d.apellidos || "" });
+      yo = await rpc("mi_sesion"); await recargarTodo(); toast("Datos actualizados.");
     } else if (f.id === "fPass") {
       if (d.a !== d.b) falla("Las contraseñas no coinciden.");
       await http("/auth/v1/user", { method: "PUT", body: { password: d.a } }); f.reset(); toast("Contraseña cambiada.");

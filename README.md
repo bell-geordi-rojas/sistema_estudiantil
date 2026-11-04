@@ -15,6 +15,8 @@ Cursos: Matemática, Ciencia y Tecnología, Ciencias Sociales, Desarrollo Person
 - **Trimestres / ciclos:** las notas se registran dentro de un periodo y se pueden filtrar por periodo. En los colegios el administrador agrega, renombra o quita trimestres; las universidades tienen **14 ciclos fijos** (Ciclo I a Ciclo XIV).
 - **Cursos propios:** los colegios empiezan con 7 cursos y el administrador (o un docente con el permiso «gestionar_cursos») puede agregar, renombrar o quitar cursos. Las universidades empiezan sin cursos.
 - **Dueño:** puede **eliminar instituciones** (pide escribir su nombre; borra cuentas, estudiantes y notas) y **pausar todo el sistema** por mantenimiento (solo el dueño puede entrar mientras tanto).
+- **Mi cuenta:** cualquier cuenta puede subir su foto de perfil (se reduce a 192×192) y cambiar su nombre; si es alumno, también se actualiza en la lista de estudiantes.
+- **Cursos en tarjetas:** la sección «Cursos» / «Mis cursos» muestra cada curso como una tarjeta con banner de colores, promedio, favoritos (★) y menú ⋮; al abrirla el alumno ve sus notas y el personal ve a sus estudiantes.
 - **Nombre y comentario de cada nota:** al agregar una nota se puede poner un nombre (examen, trabajo…) y un comentario. El alumno los ve en «Mis comentarios»; los comentarios solo los ven el personal de su institución y el propio alumno.
 - **CSV:** una fila por nota: `codigo,nombre,periodo,curso,nota,peso,titulo,comentario`.
 
