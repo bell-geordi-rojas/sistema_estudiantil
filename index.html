@@ -1350,14 +1350,33 @@ function pantallaBloqueo() {
 function pantallaApp() {
   const vs = vistasDisponibles();
   if (!vs.some(v => v[0] === vista)) vista = "panel";
-  const nav = vs.map(([k, i, n]) => `<button class="${k === vista ? "on" : ""}" data-v="${k}"><span>${i}</span>${n}${k === "solicitudes" && solic.length ? `<span class="badge">${solic.length}</span>` : ""}</button>`).join("") +
+  // Menú reducido: las pantallas afines se juntan en una sola entrada y sus partes salen como pestañas arriba del contenido
+  const GRUPOS = [
+    { id: "inst", i: "▣", n: "Institución", v: ["carreras", "asignaciones", "inscripciones", "config", "correo"] },
+    { id: "pers", i: "☺", n: "Personas", v: ["lista", "usuarios", "solicitudes", "invitar", "buscar"] },
+    { id: "misn", i: "★", n: "Mis notas", v: ["mis", "comentarios"] },
+    { id: "nota", i: "✎", n: "Calificaciones", v: ["calificar", "estadisticas"] },
+    { id: "inss", i: "⌂", n: "Instituciones", v: ["instituciones", "carpetas"] },
+    { id: "cuen", i: "⚙", n: "Mi cuenta", v: ["cuenta", "descargar"] },
+  ];
+  const dispo = new Map(vs.map(v => [v[0], v])), usados = new Set(), items = [];
+  for (const v of vs) {
+    const g = GRUPOS.find(x => x.v.includes(v[0]));
+    if (!g) { items.push({ k: v[0], i: v[1], n: v[2], m: [v[0]] }); continue; }
+    if (usados.has(g.id)) continue; usados.add(g.id);
+    const m = g.v.filter(k => dispo.has(k)), p = dispo.get(m[0]);
+    items.push(m.length === 1 ? { k: m[0], i: p[1], n: p[2], m } : { k: m[0], i: g.i, n: g.n, m });
+  }
+  const actual = items.find(it => it.m.includes(vista));
+  const pestanas = actual && actual.m.length > 1 ? `<div class="tabs" style="flex-wrap:wrap;max-width:760px">${actual.m.map(k => `<button class="${k === vista ? "on" : ""}" data-v="${k}">${dispo.get(k)[2]}${k === "solicitudes" && solic.length ? ` <span class="badge" style="display:inline-block;background:var(--red);color:#fff;border-radius:10px;padding:0 7px;font-size:11px">${solic.length}</span>` : ""}</button>`).join("")}</div>` : "";
+  const nav = items.map(it => `<button class="${it.m.includes(vista) ? "on" : ""}" data-v="${it.k}"><span>${it.i}</span>${it.n}${it.m.includes("solicitudes") && solic.length ? `<span class="badge">${solic.length}</span>` : ""}</button>`).join("") +
     (esStaff() && (permisos.exportar || permisos.registrar_estudiantes) ? `<hr class="sep">${permisos.exportar ? `<button data-a="export"><span>⇩</span>Exportar .csv</button>` : ""}${permisos.registrar_estudiantes ? `<button data-a="import"><span>⇧</span>Importar .csv</button>` : ""}` : "");
   let cuerpo;
   if (avisoCarga) cuerpo = `<div class="card"><h2>No se pudieron cargar los datos</h2><p class="err">${esc(avisoCarga)}</p><button class="btn" data-a="reintentar">Reintentar</button></div>`;
   else cuerpo = { panel: vPanel, mis: vMis, lista: vLista, registrar: vRegistrar, calificar: vCalificar, buscar: vBuscar, estadisticas: vEstadisticas,
     usuarios: vUsuarios, solicitudes: vSolicitudes, invitar: vInvitar, instituciones: vInstituciones, carpetas: vCarpetas, tareas: vTareas, cuenta: vCuenta, config: vConfig, comentarios: vComentarios, descargar: vDescargar, cursos: vCursos, correo: vCorreo, asignaciones: vAsignaciones, inscripciones: vInscripciones, carreras: vCarreras }[vista]();
   const aviso = yo.rol === "dueno" && yo.mantenimiento ? `<div class="msg warn" style="border-radius:0;text-align:center">⚠ El sistema está en mantenimiento: solo tú puedes usarlo. Reanúdalo en «Instituciones».</div>` : "";
-  return `${cabecera(true, nav)}${aviso}<div class="layout"><nav>${nav}</nav><main id="main">${cuerpo}</main></div>`;
+  return `${cabecera(true, nav)}${aviso}<div class="layout"><nav>${nav}</nav><main>${pestanas}<div id="main">${cuerpo}</div></main></div>`;
 }
 function render() {
   if (actualizacion) { cerrarDlg(); $("#root").innerHTML = pantallaActualizar(); return; }
