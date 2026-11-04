@@ -435,6 +435,14 @@ create or replace function _docente_ve_est(p_est bigint) returns boolean languag
 create or replace function _docente_ve_perfil(p_perfil uuid) returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from estudiantes e where e.perfil_id = p_perfil and _docente_ve_est(e.id)) $$;
 
+-- El docente p_perfil dicta algun curso en el que esta inscrito el alumno actual
+create or replace function _docente_de_mis_cursos(p_perfil uuid) returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from docente_cursos d join inscripciones i on i.curso_id = d.curso_id
+                 where d.docente_id = p_perfil and i.estudiante_id = (select id from estudiantes where perfil_id = auth.uid())) $$;
+-- El docente p_perfil comparte algun curso con el docente actual
+create or replace function _docente_comparte_curso(p_perfil uuid) returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from docente_cursos a join docente_cursos b on a.curso_id = b.curso_id where a.docente_id = p_perfil and b.docente_id = auth.uid()) $$;
+
 -- El usuario actual puede modificar los datos de ese estudiante (admin de su institucion; en primaria tambien su docente a cargo)
 create or replace function _puedo_gestionar(p_est bigint) returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from estudiantes e where e.id = p_est and (
@@ -488,8 +496,8 @@ create policy perf_sel on perfiles for select to authenticated using (
   id = auth.uid()
   or mi_rol() = 'dueno'
   or (mi_rol() = 'admin' and institucion_id = mi_inst())
-  or (mi_rol() = 'docente' and (docente_id = auth.uid() or (rol = 'alumno' and _docente_ve_perfil(id))))
-  or (mi_rol() = 'alumno' and (id = mi_docente()
+  or (mi_rol() = 'docente' and (docente_id = auth.uid() or (rol = 'alumno' and _docente_ve_perfil(id)) or (rol = 'docente' and _docente_comparte_curso(id))))
+  or (mi_rol() = 'alumno' and (id = mi_docente() or (rol = 'docente' and _docente_de_mis_cursos(id))
         or (permiso('ver_companeros') and rol = 'alumno' and ((docente_id is not null and docente_id = mi_docente()) or _comparten_perfil(id))))));
 
 drop policy if exists est_sel on estudiantes;
@@ -526,14 +534,16 @@ create policy carreras_sel on carreras for select to authenticated using (mi_rol
 drop policy if exists dc_sel on docente_cursos;
 create policy dc_sel on docente_cursos for select to authenticated using (
   mi_rol() = 'dueno' or docente_id = auth.uid()
-  or (mi_rol() = 'admin' and exists (select 1 from cursos c where c.id = docente_cursos.curso_id and c.institucion_id = mi_inst())));
+  or (mi_rol() = 'admin' and exists (select 1 from cursos c where c.id = docente_cursos.curso_id and c.institucion_id = mi_inst()))
+  or (mi_rol() = 'docente' and _ensena(curso_id))
+  or (mi_rol() = 'alumno' and _inscrito(_mi_estudiante(), curso_id)));
 
 drop policy if exists insc_sel on inscripciones;
 create policy insc_sel on inscripciones for select to authenticated using (
   mi_rol() = 'dueno'
   or (mi_rol() = 'admin' and exists (select 1 from cursos c where c.id = inscripciones.curso_id and c.institucion_id = mi_inst()))
   or (mi_rol() = 'docente' and _ensena(curso_id))
-  or (mi_rol() = 'alumno' and estudiante_id = _mi_estudiante()));
+  or (mi_rol() = 'alumno' and (estudiante_id = _mi_estudiante() or _inscrito(_mi_estudiante(), curso_id))));
 
 drop policy if exists periodos_sel on periodos;
 create policy periodos_sel on periodos for select to authenticated using (mi_rol() = 'dueno' or institucion_id = mi_inst());

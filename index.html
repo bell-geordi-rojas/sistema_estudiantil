@@ -774,7 +774,7 @@ function vistasDisponibles() {
   if (r !== "dueno") v.push(["cursos", "❖", r === "alumno" ? "Mis cursos" : "Cursos"]);
   if (r === "admin" && esUni()) v.push(["carreras", "◈", "Carreras"]);
   if (r === "admin" && porCurso()) { v.push(["asignaciones", "☰", "Docentes y cursos"]); v.push(["inscripciones", "✓", "Inscripciones"]); }
-  if (r === "alumno") { v.push(["mis", "★", "Mis notas"]); v.push(["comentarios", "✎", "Mis comentarios"]); if (p.ver_companeros) v.push(["lista", "☰", "Mis compañeros"]); }
+  if (r === "alumno") { v.push(["mis", "★", "Mis notas"]); v.push(["comentarios", "✎", "Mis comentarios"]); }
   else v.push(["lista", "☰", r === "dueno" ? "Estudiantes (lectura)" : "Estudiantes"]);
   if (esStaff() && p.editar_notas) v.push(["calificar", "✎", "Agregar calificación"]);
   if (r !== "alumno") v.push(["buscar", "⌕", "Buscar por código"]);
@@ -850,7 +850,7 @@ function tarjetaCursoVista(c, favs) {
     <button class="cstar ${fav ? "on" : ""}" data-a="curso-fav" data-id="${c.id}" title="${fav ? "Quitar de favoritos" : "Marcar como favorito"}">${fav ? "★" : "☆"}</button>
     <div class="cb"><div class="ct">${esc(c.nombre)}</div><div class="cs">${esc(sub)}</div>${etiquetaCurso(c) ? `<div class="ci">${esc(etiquetaCurso(c))}</div>` : ""}<div class="ci">${info}</div></div>
     <div class="cm"><button class="mini" data-a="curso-menu" data-id="${c.id}" title="Opciones" aria-label="Opciones del curso">⋮</button>
-      <div class="cmenu" id="cm${c.id}"><button data-a="curso-ver" data-id="${c.id}">${yo.rol === "alumno" ? "Ver mis notas" : "Ver estudiantes"}</button>${puedeCursos() ? `<button data-a="curso-ren" data-id="${c.id}">Renombrar</button><button data-a="curso-del" data-id="${c.id}">Quitar</button>` : ""}</div></div></div>`;
+      <div class="cmenu" id="cm${c.id}"><button data-a="curso-ver" data-id="${c.id}">Notas y personas</button>${puedeCursos() ? `<button data-a="curso-ren" data-id="${c.id}">Renombrar</button><button data-a="curso-del" data-id="${c.id}">Quitar</button>` : ""}</div></div></div>`;
 }
 function vCursos() {
   const cs = miCursos(), favs = new Set(favoritos()), orden = [...cs].sort((a, b) => (favs.has(b.id) ? 1 : 0) - (favs.has(a.id) ? 1 : 0));
@@ -1452,12 +1452,9 @@ function abrirPermisos(p) {
 
 /* ===== Acciones (clics) ===== */
 const idNum = d => Number(d.id);
-const acciones = {
-  menu() { $("#menuPop").classList.toggle("open"); },
-  "curso-menu"(d) { const m = $(`#cm${d.id}`); const abrir = !m.classList.contains("open"); document.querySelectorAll(".cmenu.open").forEach(x => x.classList.remove("open")); if (abrir) m.classList.add("open"); },
-  "curso-fav"(d) { const id = idNum(d), f = new Set(favoritos()); f.has(id) ? f.delete(id) : f.add(id); guardarLocal("fav_" + yo.id, JSON.stringify([...f])); render(); },
-  "curso-ver"(d) {
-    const c = cursoDe(idNum(d)); if (!c) return;
+/* ===== Ventana de un curso: pestañas «Notas» y «Personas» ===== */
+// Notas por periodo (trimestre o ciclo) en secciones desplegables: las notas del alumno o los alumnos del curso para el personal
+function cursoSecciones(c) {
     const alumno = yo.rol === "alumno", mio = alumno ? est.find(x => x.perfil_id === yo.id) : null;
     const ps = periodosDe(c.institucion_id).filter(p => !c.carrera_id || p.orden <= ((carreraDe(c.carrera_id) || {}).ciclos || 14));
     const lista = alumno ? [] : est.filter(e => !porCursoInst(c.institucion_id) || inscrito(e.id, c.id) || e.deCurso(c.id, null).length);
@@ -1479,9 +1476,36 @@ const acciones = {
         : (() => { const con = lista.filter(e => e.deCurso(c.id, p.id).length); return con.length ? `${con.length} estudiante(s) · prom. <b>${fmt(media(con.map(e => e.promedioCurso(c.id, p.id))))}</b>` : "Sin notas"; })();
       return `<details class="acc ${ns.length ? "" : "vacio"}" ${p.id === abierto ? "open" : ""}><summary><span>${esc(p.nombre)}</span><small>${resumen}</small></summary><div class="cuerpo">${cuerpo}</div></details>`;
     }).join("");
-    const total = alumno ? (mio ? mio.deCurso(c.id, null) : []) : [];
-    abrirCompartido(`.ccard[data-id="${c.id}"] .banw`, "banner-curso", `<div class="banw" style="margin:-18px -18px 14px;view-transition-name:banner-curso">${bannerCurso(c.id)}</div><div class="dhead"><div><b>${esc(c.nombre)}</b><small>${alumno && total.length ? `${esUni() ? "Promedio ponderado" : "Promedio"} del curso: ${fmt(mediaPond(total))}` : (alumno ? "Sin notas aún" : "Notas por " + nomPeriodo(yo.institucion.tipo).toLowerCase())}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>${secciones || `<div class="empty">Aún no hay ${nomPeriodos(yo.institucion.tipo)} configurados.</div>`}`);
-  },  efectos() { const on = !efectosActivos(); document.documentElement.dataset.efectos = on ? "on" : "off"; guardarLocal("efectos", on ? "on" : "off"); render(); toast(on ? "Efectos visuales activados." : "Efectos visuales desactivados."); },
+  return secciones;
+}
+// Quienes están en el curso y su categoría. En secundaria y universidad: los docentes asignados y los alumnos inscritos;
+// en primaria: el docente a cargo y los compañeros de aula.
+function personasCurso(c) {
+  const por = porCursoInst(c.institucion_id), esAlumno = yo.rol === "alumno";
+  const docs = por ? docCursos.filter(x => x.curso_id === c.id).map(x => perfilDe(x.docente_id)).filter(Boolean)
+    : esAlumno ? [perfilDe(yo.docente_id)].filter(Boolean) : yo.rol === "docente" ? [perfilDe(yo.id)].filter(Boolean) : docentesDe(c.institucion_id);
+  const alumnos = (por ? est.filter(e => inscrito(e.id, c.id)) : est.slice()).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const fila = (av, nombre, sub, cat) => `<tr><td><div class="who">${av}<div>${nombre}${sub ? `<small>${sub}</small>` : ""}</div></div></td><td><span class="tag">${cat}</span></td></tr>`;
+  const filasDoc = docs.length ? docs.map(d => fila(avatarDe(nombreCompleto(d), d.usuario, d.id), esc(nombreCompleto(d)) + (d.id === yo.id ? " (tú)" : ""), esc(correoInst(d.usuario, d.institucion_id)), "Docente")).join("")
+    : `<tr><td colspan="2"><small>Aún no hay un docente asignado a este curso.</small></td></tr>`;
+  const filasAl = alumnos.map(e => fila(avatarDe(e.nombre, e.codigo, e.perfil_id), esc(e.nombre) + (e.perfil_id === yo.id ? " (tú)" : ""), esc(e.codigo), "Alumno")).join("");
+  return `<div class="scroll"><table><thead><tr><th>Nombre</th><th>Categoría</th></tr></thead><tbody>${filasDoc}${filasAl || `<tr><td colspan="2"><small>Aún no hay alumnos inscritos.</small></td></tr>`}</tbody></table></div>
+    <p style="color:var(--mute);font-size:13px;margin:10px 0 0">${docs.length} docente(s) · ${alumnos.length} alumno(s)${esAlumno && !permisos.ver_companeros ? " · tu institución no te permite ver a tus compañeros" : ""}</p>`;
+}
+function htmlCurso(c, tab) {
+  const alumno = yo.rol === "alumno", mio = alumno ? est.find(x => x.perfil_id === yo.id) : null, total = alumno && mio ? mio.deCurso(c.id, null) : [];
+  const sub = alumno && total.length ? `${esUni() ? "Promedio ponderado" : "Promedio"} del curso: ${fmt(mediaPond(total))}` : (alumno ? "Sin notas aún" : "Notas por " + nomPeriodo(yo.institucion.tipo).toLowerCase());
+  const pestana = (k, n) => `<button class="${tab === k ? "on" : ""}" data-a="curso-tab" data-id="${k}" data-c="${c.id}">${n}</button>`;
+  return `<div class="banw" style="margin:-18px -18px 14px;view-transition-name:banner-curso">${bannerCurso(c.id)}</div><div class="dhead"><div><b>${esc(c.nombre)}</b><small>${etiquetaCurso(c) ? esc(etiquetaCurso(c)) + " · " : ""}${esc(sub)}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>
+    <div class="tabs" style="max-width:320px;margin-bottom:12px">${pestana("notas", "Notas")}${pestana("personas", "Personas")}</div>
+    ${tab === "personas" ? personasCurso(c) : (cursoSecciones(c) || `<div class="empty">Aún no hay ${nomPeriodos(yo.institucion.tipo)} configurados.</div>`)}`;
+}
+const acciones = {
+  menu() { $("#menuPop").classList.toggle("open"); },
+  "curso-menu"(d) { const m = $(`#cm${d.id}`); const abrir = !m.classList.contains("open"); document.querySelectorAll(".cmenu.open").forEach(x => x.classList.remove("open")); if (abrir) m.classList.add("open"); },
+  "curso-fav"(d) { const id = idNum(d), f = new Set(favoritos()); f.has(id) ? f.delete(id) : f.add(id); guardarLocal("fav_" + yo.id, JSON.stringify([...f])); render(); },
+  "curso-ver"(d) { const c = cursoDe(idNum(d)); if (!c) return; abrirCompartido(`.ccard[data-id="${c.id}"] .banw`, "banner-curso", htmlCurso(c, "notas")); },
+  "curso-tab"(d) { const c = cursoDe(Number(d.c)); if (c) $("#dlgBody").innerHTML = htmlCurso(c, d.id); },  efectos() { const on = !efectosActivos(); document.documentElement.dataset.efectos = on ? "on" : "off"; guardarLocal("efectos", on ? "on" : "off"); render(); toast(on ? "Efectos visuales activados." : "Efectos visuales desactivados."); },
   async "correo-copiar-script"() { await copiar(SCRIPT_CORREO); },
   "correo-generar"() { const c = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789", b = crypto.getRandomValues(new Uint8Array(28)); $("#correoSecreto").value = [...b].map(x => c[x % c.length]).join(""); toast("Clave generada: cópiala en la propiedad SECRETO del script."); },
   async "correo-copiar-clave"() { const v = $("#correoSecreto").value; if (v) await copiar(v); else toast("Primero genera o escribe la clave."); },
