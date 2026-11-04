@@ -8,6 +8,7 @@
 <link rel="apple-touch-icon" href="logo.png">
 <script>
 try { document.documentElement.dataset.theme = localStorage.getItem("tema") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); } catch { document.documentElement.dataset.theme = "light"; }
+try { document.documentElement.dataset.efectos = localStorage.getItem("efectos") === "off" ? "off" : "on"; } catch { document.documentElement.dataset.efectos = "on"; }
 </script>
 <style>
 :root{
@@ -26,7 +27,7 @@ try { document.documentElement.dataset.theme = localStorage.getItem("tema") || (
 }
 *{box-sizing:border-box}
 body{margin:0;font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
-header{background:var(--teal);color:#fff;min-height:56px;display:flex;align-items:center;padding:6px 20px;gap:14px;flex-wrap:wrap}
+header{background:var(--teal);color:#fff;min-height:56px;display:flex;align-items:center;padding:6px 20px;gap:14px;flex-wrap:wrap;position:sticky;top:0;z-index:30;view-transition-name:cabecera}
 .logo{font-weight:800;font-size:20px;letter-spacing:.5px;display:flex;align-items:center;gap:8px}
 .logo i{width:28px;height:28px;border-radius:50%;background:#fff;display:inline-block;position:relative}
 .logo i::after{content:"";position:absolute;inset:7px;border-radius:50%;background:#1f6feb}
@@ -35,16 +36,17 @@ header .sp{flex:1}
 .user small{display:block;opacity:.85;font-size:11px}
 .hbtn{background:rgba(255,255,255,.18);color:#fff;border:0;border-radius:8px;padding:7px 12px;font:inherit;cursor:pointer}
 .hbtn:hover{background:rgba(255,255,255,.3)}
+.btn,.hbtn,nav button,.av,.ccard,.cstar{transition:transform .18s cubic-bezier(.2,.8,.2,1),background .15s,box-shadow .2s}
 .av.big{width:84px;height:84px;font-size:28px}
 .av{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:700;font-size:12px;flex:none}
 .layout{display:grid;grid-template-columns:220px 1fr;min-height:calc(100vh - 56px)}
-nav{background:var(--side);border-right:1px solid var(--line);padding:14px 10px}
+nav{view-transition-name:barra;background:var(--side);border-right:1px solid var(--line);padding:14px 10px}
 nav button{display:flex;width:100%;gap:10px;align-items:center;border:0;background:none;padding:10px 12px;border-radius:8px;font:inherit;color:var(--ink);cursor:pointer;text-align:left;margin-bottom:2px}
 nav button:hover{background:var(--hover)}
 nav button.on{background:var(--violet-l);color:var(--nav-on);font-weight:600}
 nav .sep{border:0;border-top:1px solid var(--line);margin:10px 0}
 nav .badge{margin-left:auto;background:var(--red);color:#fff;border-radius:10px;padding:0 7px;font-size:11px;font-weight:700}
-main{padding:20px 24px;min-width:0}
+main{padding:20px 24px;min-width:0;view-transition-name:contenido}
 .bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center}
 .chip{background:var(--card);border:1px solid var(--line);padding:7px 14px;border-radius:8px;font-size:13px}
 .chip.on{background:var(--chip-on);border-color:var(--chip-bd)}
@@ -106,7 +108,40 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--focus);border-co
 .add input{flex:1}
 .add .btn{padding:6px 12px}
 dialog{border:0;border-radius:12px;padding:0;background:var(--card);color:var(--ink);width:min(760px,94vw);max-height:90vh;box-shadow:0 20px 50px rgba(0,0,0,.35)}
-dialog::backdrop{background:rgba(10,14,24,.55)}
+dialog::backdrop{background:rgba(10,14,24,.45)}
+dialog[data-estrecho]{width:min(380px,92vw)}
+.fotoGrande{display:block;width:100%;aspect-ratio:1;object-fit:cover;border-radius:12px}
+
+/* ===== Efectos visuales: blur, magnificación, fundido (crossfade) y elemento compartido ===== */
+@supports (backdrop-filter:blur(1px)) and (background:color-mix(in srgb,red,blue)){
+  header{background:color-mix(in srgb,var(--teal) 80%,transparent);-webkit-backdrop-filter:blur(14px) saturate(1.3);backdrop-filter:blur(14px) saturate(1.3)}
+  dialog::backdrop{-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+  .menupop,.cmenu{background:color-mix(in srgb,var(--card) 86%,transparent);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
+  .toast{background:rgba(17,24,39,.82);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+  .cstar{-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+}
+.btn:hover:not(:disabled){transform:scale(1.045)}
+.hbtn:hover{transform:scale(1.07)}
+nav button:hover{transform:translateX(4px) scale(1.035)}
+.av:hover{transform:scale(1.22)}
+.av.big{cursor:default}
+.av.big[data-a]{cursor:zoom-in}
+.ccard:hover{transform:translateY(-3px) scale(1.035);z-index:3}
+.cstar:hover{transform:scale(1.2)}
+dialog[open]:not([data-vt]){animation:dlgIn .26s cubic-bezier(.2,.8,.2,1)}
+dialog[open]::backdrop{animation:bdIn .26s ease}
+@keyframes dlgIn{from{opacity:0;transform:translateY(16px) scale(.96);filter:blur(8px)}to{opacity:1;transform:none;filter:none}}
+@keyframes bdIn{from{opacity:0}to{opacity:1}}
+::view-transition-group(root){animation-duration:.25s}
+::view-transition-old(contenido){animation:vtOut .22s ease both}
+::view-transition-new(contenido){animation:vtIn .3s ease both}
+@keyframes vtOut{to{opacity:0;filter:blur(8px);transform:scale(.985)}}
+@keyframes vtIn{from{opacity:0;filter:blur(8px);transform:scale(1.015)}}
+::view-transition-group(banner-curso),::view-transition-group(foto-perfil){animation-duration:.42s;animation-timing-function:cubic-bezier(.2,.8,.2,1)}
+::view-transition-old(banner-curso),::view-transition-new(banner-curso),::view-transition-old(foto-perfil),::view-transition-new(foto-perfil){height:100%;width:100%;object-fit:cover}
+:root[data-efectos=off] *,:root[data-efectos=off] ::before,:root[data-efectos=off] ::after{animation:none!important;transition:none!important}
+:root[data-efectos=off] ::view-transition-group(*),:root[data-efectos=off] ::view-transition-old(*),:root[data-efectos=off] ::view-transition-new(*){animation:none!important}
+:root[data-efectos=off] .btn:hover,:root[data-efectos=off] .hbtn:hover,:root[data-efectos=off] nav button:hover,:root[data-efectos=off] .av:hover,:root[data-efectos=off] .ccard:hover,:root[data-efectos=off] .cstar:hover{transform:none}
 .dlg{padding:18px;overflow:auto;max-height:90vh}
 .dhead{display:flex;align-items:center;gap:12px;margin-bottom:14px}
 .dhead>div:nth-child(2){flex:1}
@@ -402,7 +437,7 @@ async function cargarFotos() {
 }
 function salir() {
   if (sesion) fetch(`${SUPABASE_URL}/auth/v1/logout`, { method: "POST", headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${sesion.access_token}` } }).catch(() => {});
-  cerrarSesionLocal(); yo = null; permisos = {}; est = []; perfiles = []; insts = []; solic = []; invs = []; cursos = []; periodos = []; fotos = {}; periodoSel = null; tabLogin = "ingresar"; render();
+  cerrarSesionLocal(); yo = null; permisos = {}; est = []; perfiles = []; insts = []; solic = []; invs = []; cursos = []; periodos = []; fotos = {}; periodoSel = null; tabLogin = "ingresar"; conTransicion(render);
   cargarEstadoSistema();
 }
 async function cargarEstadoSistema() {
@@ -783,7 +818,7 @@ function vCarpetas() {
   return `<div class="card"><h2>Carpetas</h2><ul class="tree"><li><details open><summary>📁 <b>Admin</b> <small>${esc(nombreCompleto(yo))}</small></summary><ul>${arbol || "<li><small>Aún no hay instituciones.</small></li>"}</ul></details></li></ul></div>`;
 }
 function vCuenta() {
-  const grande = avatarDe(nombreCompleto(yo), yo.usuario, yo.id).replace('class="av"', 'class="av big"'), tiene = !!fotos[yo.id];
+  const tiene = !!fotos[yo.id], grande = avatarDe(nombreCompleto(yo), yo.usuario, yo.id).replace('class="av"', tiene ? 'class="av big" data-a="foto-ampliar" title="Ampliar foto"' : 'class="av big"');
   return `<div class="card"><h2>Mi cuenta</h2><div class="who" style="gap:16px;align-items:center">${grande}<div><b>${esc(nombreCompleto(yo))}</b> · <code>${esc(yo.usuario)}</code> · <span class="tag">${ROL[yo.rol]}</span><br>
     <small>${yo.institucion ? esc(yo.institucion.nombre) + (yo.institucion.vence ? " · afiliación hasta " + esc(yo.institucion.vence) : "") : "Propietario del sistema"}</small>
     <div class="bar" style="margin:10px 0 0"><button class="btn sm sec" data-a="foto-elegir">📷 ${tiene ? "Cambiar foto" : "Subir foto"}</button>${tiene ? `<button class="btn del" data-a="foto-quitar">Quitar foto</button>` : ""}</div></div></div>
@@ -792,6 +827,8 @@ function vCuenta() {
     <label>Apellidos<input name="apellidos" value="${esc(yo.apellidos || "")}" maxlength="80"></label></div>
     ${yo.rol === "alumno" ? `<small>Tu nombre también se actualiza en la lista de estudiantes de tu docente.</small>` : ""}
     <div class="err"></div><div><button class="btn">Guardar nombre</button></div></form></div>
+    <div class="card"><h2>Apariencia</h2><p style="margin-top:0;color:var(--mute)">Efectos visuales: fundido entre pantallas, ventanas que crecen desde su tarjeta, desenfoque y zoom al pasar el cursor. Si te molestan o el equipo va lento, apágalos.</p>
+    <button class="btn ${efectosActivos() ? "sec" : ""}" data-a="efectos">${efectosActivos() ? "Desactivar efectos visuales" : "Activar efectos visuales"}</button></div>
     <div class="card"><h2>Cambiar contraseña</h2><form class="form" id="fPass"><label>Nueva contraseña<input type="password" name="a" minlength="6" required autocomplete="new-password"></label>
     <label>Repite la contraseña<input type="password" name="b" minlength="6" required autocomplete="new-password"></label>
     <div class="err"></div><div><button class="btn">Cambiar contraseña</button></div></form></div>`;
@@ -876,7 +913,7 @@ function render() {
   if (actualizacion) { cerrarDlg(); $("#root").innerHTML = pantallaActualizar(); return; }
   $("#root").innerHTML = !yo ? pantallaLogin() : !yo.acceso ? pantallaBloqueo() : pantallaApp();
 }
-function irA(v) { if (v === "registrar") borrador = []; vista = v; render(); }
+function irA(v) { if (v === "registrar") borrador = []; vista = v; conTransicion(render); }
 
 /* ===== Ventanas (modal) ===== */
 // Reemplazo de prompt() (el programa de PC no lo admite): devuelve el texto o null si se cancela
@@ -891,10 +928,46 @@ function pedir(texto, valor = "") {
   });
 }
 const dlg = $("#dlg");
-function abrirDlg(html) { $("#dlgBody").innerHTML = html; if (!dlg.open) dlg.showModal(); }
-function cerrarDlg() { if (dlg.open) dlg.close(); detalleId = null; $("#dlgBody").innerHTML = ""; }
-dlg.addEventListener("click", ev => { if (ev.target === dlg) cerrarDlg(); });
-dlg.addEventListener("close", () => { if (dlg.open) return; detalleId = null; $("#dlgBody").innerHTML = ""; });   // también al cerrar con Esc
+// Transiciones (View Transitions API): fundido con blur entre pantallas y elemento compartido entre una tarjeta y su ventana.
+// Si el navegador no las soporta (o el usuario apagó los efectos en Mi cuenta) todo funciona igual, sin animación.
+const efectosActivos = () => document.documentElement.dataset.efectos !== "off";   // se controla en Mi cuenta (por defecto activados)
+const hayTransiciones = () => !!document.startViewTransition && efectosActivos();
+// Ejecuta `fn` una sola vez: dentro de la transición o, si el navegador no la arranca a tiempo, por la red de seguridad
+function unaVez(fn) { let hecho = false; return () => { if (hecho) return; hecho = true; fn(); }; }
+function conTransicion(fn) {
+  if (!hayTransiciones()) { fn(); return; }
+  const f = unaVez(fn), t = document.startViewTransition(f);
+  t.ready.catch(() => {}); t.finished.catch(() => {}); t.updateCallbackDone.catch(e => console.error(e));
+  setTimeout(f, 1200);
+}let compartidoAct = null;   // {sel, nombre}: elemento de la pantalla al que la ventana abierta "vuelve" al cerrarse
+function abrirDlg(html, opc = {}) {
+  $("#dlgBody").innerHTML = html;
+  compartidoAct = opc.compartido || null;
+  dlg.toggleAttribute("data-vt", !!opc.compartido); dlg.toggleAttribute("data-estrecho", !!opc.estrecho);
+  if (!dlg.open) dlg.showModal();
+}
+// Abre la ventana "creciendo" desde el elemento `sel` (el destino dentro de `html` debe llevar view-transition-name: nombre)
+function abrirCompartido(sel, nombre, html, opc = {}) {
+  const origen = document.querySelector(sel);
+  if (!hayTransiciones() || !origen) { abrirDlg(html, opc); return; }
+  origen.style.viewTransitionName = nombre;
+  const f = unaVez(() => { origen.style.viewTransitionName = ""; abrirDlg(html, { ...opc, compartido: { sel, nombre } }); });
+  const t = document.startViewTransition(f);
+  t.ready.catch(() => {}); t.finished.catch(() => {}); t.updateCallbackDone.catch(e => console.error(e));
+  setTimeout(f, 1200);
+}
+function cerrarDlg() {
+  const c = compartidoAct, cierre = () => { if (dlg.open) dlg.close(); detalleId = null; compartidoAct = null; $("#dlgBody").innerHTML = ""; };
+  const destino = c && dlg.open && hayTransiciones() ? document.querySelector(c.sel) : null;
+  if (!destino) { cierre(); return; }
+  const f = unaVez(() => { cierre(); destino.style.viewTransitionName = c.nombre; });
+  const t = document.startViewTransition(f);
+  t.ready.catch(() => {}); t.updateCallbackDone.catch(e => console.error(e));
+  t.finished.catch(() => {}).finally(() => { destino.style.viewTransitionName = ""; });
+  setTimeout(() => { f(); destino.style.viewTransitionName = ""; }, 1200);   // red de seguridad
+}dlg.addEventListener("click", ev => { if (ev.target === dlg) cerrarDlg(); });
+dlg.addEventListener("cancel", ev => { if (compartidoAct) { ev.preventDefault(); cerrarDlg(); } });   // Esc también vuelve animado a la tarjeta
+dlg.addEventListener("close", () => { if (dlg.open) return; detalleId = null; compartidoAct = null; $("#dlgBody").innerHTML = ""; });   // también al cerrar con Esc
 function renderDetalle() {
   const e = est.find(x => x.id === detalleId); if (!e) { cerrarDlg(); return; }
   const staff = esStaff(), eNotas = staff && permisos.editar_notas, eDatos = staff && permisos.editar_estudiantes, eDel = staff && permisos.eliminar;
@@ -969,12 +1042,18 @@ const acciones = {
       return `<details class="acc ${ns.length ? "" : "vacio"}" ${p.id === abierto ? "open" : ""}><summary><span>${esc(p.nombre)}</span><small>${resumen}</small></summary><div class="cuerpo">${cuerpo}</div></details>`;
     }).join("");
     const total = alumno ? (mio ? mio.deCurso(c.id, null) : []) : [];
-    abrirDlg(`<div class="banw" style="margin:-18px -18px 14px">${bannerCurso(c.id)}</div><div class="dhead"><div><b>${esc(c.nombre)}</b><small>${alumno && total.length ? `${esUni() ? "Promedio ponderado" : "Promedio"} del curso: ${fmt(mediaPond(total))}` : (alumno ? "Sin notas aún" : "Notas por " + nomPeriodo(yo.institucion.tipo).toLowerCase())}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>${secciones || `<div class="empty">Aún no hay ${nomPeriodos(yo.institucion.tipo)} configurados.</div>`}`);
-  },  "foto-elegir"() { $("#fotoIn").click(); },
+    abrirCompartido(`.ccard[data-id="${c.id}"] .banw`, "banner-curso", `<div class="banw" style="margin:-18px -18px 14px;view-transition-name:banner-curso">${bannerCurso(c.id)}</div><div class="dhead"><div><b>${esc(c.nombre)}</b><small>${alumno && total.length ? `${esUni() ? "Promedio ponderado" : "Promedio"} del curso: ${fmt(mediaPond(total))}` : (alumno ? "Sin notas aún" : "Notas por " + nomPeriodo(yo.institucion.tipo).toLowerCase())}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>${secciones || `<div class="empty">Aún no hay ${nomPeriodos(yo.institucion.tipo)} configurados.</div>`}`);
+  },  efectos() { const on = !efectosActivos(); document.documentElement.dataset.efectos = on ? "on" : "off"; guardarLocal("efectos", on ? "on" : "off"); render(); toast(on ? "Efectos visuales activados." : "Efectos visuales desactivados."); },
+  "foto-elegir"() { $("#fotoIn").click(); },
+  "foto-ampliar"() {
+    if (!fotos[yo.id]) return;
+    abrirCompartido(".av.big", "foto-perfil", `<div class="dhead"><div><b>${esc(nombreCompleto(yo))}</b><small>${ROL[yo.rol]}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>
+      <img class="fotoGrande" src="${fotos[yo.id]}" alt="Foto de perfil" style="view-transition-name:foto-perfil">`, { estrecho: true });
+  },
   async "foto-quitar"() { await rpc("actualizar_mi_foto", { p_foto: null }); delete fotos[yo.id]; yo.foto = null; render(); toast("Foto quitada."); },
   async tema() { setTema(temaActual() === "dark" ? "light" : "dark"); render(); if (detalleId) renderDetalle(); },
   async salir() { cerrarDlg(); salir(); },
-  async tab(d) { tabLogin = d.id; instSel = null; render(); },
+  async tab(d) { tabLogin = d.id; instSel = null; conTransicion(render); },
   async reintentar() { avisoCarga = ""; try { await cargarDatos(); } catch (e) { avisoCarga = e.message; } render(); },
   cerrar() { cerrarDlg(); },
   async copiar(d) { await copiar(d.t); },
@@ -1118,7 +1197,7 @@ document.addEventListener("change", ev => {
   const t = ev.target;
   if (t.id === "ord") { orden = +t.value; $("#main").innerHTML = vLista(); }
   else if (t.id === "invRol" || t.id === "invInst") actualizarFormInvitar();
-  else if (t.id === "perSel") { periodoSel = t.value ? Number(t.value) : null; render(); if (detalleId) renderDetalle(); }
+  else if (t.id === "perSel") { periodoSel = t.value ? Number(t.value) : null; conTransicion(render); if (detalleId) renderDetalle(); }
   else if (t.id === "perCal") repintarCal();
   else if (t.id === "fotoIn") subirFoto(t.files[0]).catch(e => toast(e.message));
 });
@@ -1136,7 +1215,7 @@ document.addEventListener("submit", ev => {
   const falla = m => { throw new Error(m); };
   conBoton(f, async err => {
     if (f.id === "fLogin") {
-      await iniciarSesion(d.usuario, d.clave); await entrar(); render();
+      await iniciarSesion(d.usuario, d.clave); await entrar(); conTransicion(render);
     } else if (f.id === "fActivar") {
       if (d.a !== d.b) falla("Las contraseñas no coinciden.");
       await activarCuenta(d.usuario, d.codigo.trim(), d.a); await entrar(); render(); toast("¡Cuenta activada! Bienvenido.");
