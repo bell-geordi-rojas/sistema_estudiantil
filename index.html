@@ -563,7 +563,8 @@ const puedeCursos = () => !!yo && (yo.rol === "admin" || (yo.rol === "docente" &
 const instDeId = id => (yo && yo.institucion && yo.institucion.id === id) ? yo.institucion : insts.find(x => x.id === id);
 const porCursoInst = id => { const i = instDeId(id); return !!i && (i.tipo === "universidad" || i.nivel === "secundaria"); };
 const porCurso = () => !!yo && !!yo.institucion && porCursoInst(yo.institucion.id);
-const etiquetaTipo = i => i.tipo === "universidad" ? "Universidad" : `Colegio ${i.nivel === "secundaria" ? "secundaria" : "primaria"}`;
+const nomUni = i => i && i.instituto ? "Instituto" : "Universidad";   // un instituto funciona igual que una universidad
+const etiquetaTipo = i => i.tipo === "universidad" ? nomUni(i) : `Colegio ${i.nivel === "secundaria" ? "secundaria" : "primaria"}`;
 const carrerasDe = id => carreras.filter(c => c.institucion_id === id);
 const carreraDe = id => carreras.find(c => c.id === id);
 const inscrito = (estId, cursoId) => inscrSet.has(estId + "-" + cursoId);
@@ -718,7 +719,7 @@ function selPeriodo() {
   return `<select id="perSel" title="Ver notas de un ${nomPeriodo(yo.institucion.tipo).toLowerCase()}"><option value="">Todos los ${nomPeriodos(yo.institucion.tipo)}</option>${ps.map(p => `<option value="${p.id}" ${p.id === periodoSel ? "selected" : ""}>${esc(p.nombre)}</option>`).join("")}</select>`;
 }
 function resumenPeriodos(e) {
-  const ps = periodosDe(e.institucion_id); if (ps.length < 2) return "";
+  const ps = yo.rol === "alumno" ? misPeriodos() : periodosDe(e.institucion_id); if (ps.length < 2) return "";
   return `<div class="chips" style="margin-top:10px">${ps.map(p => `<span class="chip ${p.id === periodoSel ? "on" : ""}">${esc(p.nombre)}: <b>${e.totalNotas(p.id) ? fmt(e.promedio(p.id)) : "–"}</b></span>`).join("")}</div>`;
 }
 function detalleTabla(e) {
@@ -810,7 +811,7 @@ function vPanel() {
       <div class="kpi"><span>Estudiantes</span><b>${est.length}</b></div></div>` + vInstituciones();
   }
   const s = stats(est);
-  return `<div class="bar"><span class="chip on">${esc(yo.institucion.nombre)} · ${esUni() ? "Universidad" : "Colegio"}</span><span class="chip">${esUni() ? "Promedio ponderado" : "Promedio general"}: ${s.general === null ? "—" : fmt(s.general)}</span>${selPeriodo()}</div>${kpisHTML(s)}
+  return `<div class="bar"><span class="chip on">${esc(yo.institucion.nombre)} · ${esUni() ? nomUni(yo.institucion) : "Colegio"}</span><span class="chip">${esUni() ? "Promedio ponderado" : "Promedio general"}: ${s.general === null ? "—" : fmt(s.general)}</span>${selPeriodo()}</div>${kpisHTML(s)}
     <div class="grid"><div><div class="card"><h2>Estudiantes ${puedeGestionar() ? `<button class="btn" data-v="invitar">+ Nuevo</button>` : ""}</h2>${filas(est.slice(0, 6), { acciones: false })}</div></div>
     <div><div class="card"><h2>Aprobación</h2>${donut(s.aprobados, s.reprobados, "#0e9aa7", "#c9a8f7")}${leyenda}</div>
     <div class="card"><h2>Promedio por estudiante</h2>${bars(est)}</div></div></div>`;
@@ -1067,7 +1068,7 @@ function vInstituciones() {
       <input name="nombre" placeholder="Nombre (p. ej. María Auxiliadora)" required style="flex:1;min-width:220px">
       <input name="dominio" id="instDom" placeholder="Dominio de correo (ej. midominio.edu)" style="min-width:210px" autocapitalize="none">
       <select name="workspace" id="instWs" title="Google Workspace de la institución"><option value="no">Sin Google Workspace (cuentas solo del sistema)</option><option value="si">Ya tiene Google Workspace (dominio obligatorio)</option></select>
-      <select name="tipo" title="Tipo de institución"><option value="primaria">Colegio primaria (un docente dicta todos los cursos de su aula)</option><option value="secundaria">Colegio secundaria (docentes por curso e inscripciones)</option><option value="universidad">Universidad (carreras, ciclos, notas con peso)</option></select>
+      <select name="tipo" title="Tipo de institución"><option value="primaria">Colegio primaria (un docente dicta todos los cursos de su aula)</option><option value="secundaria">Colegio secundaria (docentes por curso e inscripciones)</option><option value="universidad">Universidad (carreras, ciclos, notas con peso)</option><option value="instituto">Instituto (igual que universidad, con nombre de instituto)</option></select>
       <label style="display:flex;gap:6px;align-items:center">Vence <input type="date" name="vence"></label><button class="btn">Crear</button></form><div class="err"></div>
       <p style="margin:10px 0 0;color:var(--mute);font-size:13px">Google no permite crear un Google Workspace nuevo desde otra aplicación (solo lo contrata la propia institución, con su dominio; las instituciones educativas elegibles pueden pedir <i>Google Workspace for Education</i>, gratuito). Si ya lo tiene, elige «Ya tiene Google Workspace» y escribe su dominio: el administrador de la institución lo conecta después en «Correo institucional» y activa la creación de cuentas reales.</p></div>` : "";
   const tabla = insts.length ? `<div class="scroll"><table><thead><tr><th>Institución</th><th>Tipo</th><th>Correo institucional</th><th>Google</th><th>Carpeta</th><th>Docentes</th><th>Estudiantes</th><th>Vence</th><th>Estado</th><th></th></tr></thead><tbody>` +
@@ -1079,7 +1080,7 @@ function vInstituciones() {
       <td><span class="pill ${i.activa && !vencida ? "ok" : "no"}">${!i.activa ? "Suspendida" : vencida ? "Vencida" : "Activa"}</span></td>
       <td style="white-space:nowrap"><button class="btn sm sec" data-a="inst-guardar" data-id="${i.id}">Guardar fecha</button>
         <button class="btn sm sec" data-a="inst-toggle" data-id="${i.id}">${i.activa ? "Suspender" : "Reactivar"}</button>
-        <select id="tp${i.id}" title="Cambiar el tipo de institución">${[["primaria", "Colegio primaria"], ["secundaria", "Colegio secundaria"], ["universidad", "Universidad"]].map(([v, n]) => `<option value="${v}" ${v === (i.tipo === "universidad" ? "universidad" : i.nivel) ? "selected" : ""}>${n}</option>`).join("")}</select> <button class="btn sm sec" data-a="inst-tipo" data-id="${i.id}">Cambiar tipo</button>
+        <select id="tp${i.id}" title="Cambiar el tipo de institución">${[["primaria", "Colegio primaria"], ["secundaria", "Colegio secundaria"], ["universidad", "Universidad"], ["instituto", "Instituto"]].map(([v, n]) => `<option value="${v}" ${v === (i.tipo === "universidad" ? (i.instituto ? "instituto" : "universidad") : i.nivel) ? "selected" : ""}>${n}</option>`).join("")}</select> <button class="btn sm sec" data-a="inst-tipo" data-id="${i.id}">Cambiar tipo</button>
         <button class="btn sm" data-a="inst-admin" data-id="${i.id}">+ Administrador</button>
         <button class="btn del" data-a="inst-del" data-id="${i.id}">Eliminar</button></td></tr>`; }).join("") + `</tbody></table></div>` : `<div class="empty">Aún no hay instituciones. Crea la primera arriba.</div>`;
   return `${crear}<div class="card"><h2>Instituciones</h2>${tabla}</div>`;
@@ -1093,7 +1094,7 @@ function vConfig() {
   const campoCarrera = uni ? `<select name="carrera" id="cursoCar" title="Carrera del curso"><option value="">Curso común (todas las carreras)</option>${cars.map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join("")}</select><select name="ciclo" id="cursoCiclo" title="Ciclo" disabled><option value="">Ciclo</option></select>` : "";
   const grupos = gruposCursos(cs);
   const cursosCard = `<div class="card"><h2>Cursos <small>${cs.length}</small></h2>
-    <p style="margin-top:0;color:var(--mute)">${cs.length ? "Agrega los cursos que no vengan por defecto." : "Aún no hay cursos: agrega los de tu institución."}${uni ? " En una universidad cada curso pertenece a una carrera y a un ciclo de su plan de estudios." : ""} Quitar un curso borra también sus notas.</p>
+    <p style="margin-top:0;color:var(--mute)">${cs.length ? "Agrega los cursos que no vengan por defecto." : "Aún no hay cursos: agrega los de tu institución."}${uni ? ` En ${yo.institucion.instituto ? "un instituto" : "una universidad"} cada curso pertenece a una carrera y a un ciclo de su plan de estudios.` : ""} Quitar un curso borra también sus notas.</p>
     <form class="bar" id="fCurso"><input name="nombre" placeholder="Nombre del curso nuevo" maxlength="80" required style="flex:1;min-width:220px">${campoCarrera}<button class="btn">Agregar curso</button></form><div class="err"></div>
     ${grupos.map(g => `<div class="scroll">${g.titulo ? `<h3 style="margin:14px 0 4px;font-size:14px">${esc(g.titulo)}</h3>` : ""}<table><tbody>${g.lista.map(c => filaItem("curso", c, c.ciclo ? "Ciclo " + c.ciclo : "")).join("")}</tbody></table></div>`).join("")}</div>`;
   const perCard = yo.rol === "admin" && tipo !== "universidad" ? `<div class="card"><h2>${tipo === "universidad" ? "Ciclos" : "Trimestres"} <small>${ps.length}</small></h2>
@@ -1686,14 +1687,14 @@ const acciones = {
     if (confirm(`¿Quitar «${p.nombre}»?` + (n ? ` Se borrarán también ${n} nota(s) de ese periodo.` : ""))) { await rpc("eliminar_periodo", { p_id: p.id }); await recargarTodo(); toast("Eliminado."); }
   },
   async "inst-tipo"(d) {
-    const i = instDe(idNum(d)), v = $(`#tp${i.id}`).value, actual = i.tipo === "universidad" ? "universidad" : i.nivel;
+    const i = instDe(idNum(d)), v = $(`#tp${i.id}`).value, actual = i.tipo === "universidad" ? (i.instituto ? "instituto" : "universidad") : i.nivel, uniV = v === "universidad" || v === "instituto";
     if (v === actual) { toast("Ya es de ese tipo."); return; }
-    const aCursos = (v === "secundaria" || v === "universidad") && !(actual === "secundaria" || actual === "universidad");
-    const aviso = aCursos ? `¿Pasar «${i.nombre}» a ${v === "universidad" ? "universidad" : "colegio secundaria"}? Los alumnos actuales se inscribirán en los cursos que ya existen y los docentes con alumnos recibirán todos los cursos; después ajústalo en «Docentes y cursos» e «Inscripciones».`
+    const aCursos = (v === "secundaria" || uniV) && !(actual === "secundaria" || actual === "universidad" || actual === "instituto");
+    const aviso = aCursos ? `¿Pasar «${i.nombre}» a ${uniV ? v : "colegio secundaria"}? Los alumnos actuales se inscribirán en los cursos que ya existen y los docentes con alumnos recibirán todos los cursos; después ajústalo en «Docentes y cursos» e «Inscripciones».`
       : v === "primaria" ? `¿Pasar «${i.nombre}» a colegio primaria? Cada docente volverá a ver solo a los alumnos que tiene a cargo, y las notas con peso volverán a valer 1.`
-      : `¿Cambiar «${i.nombre}» a ${v === "universidad" ? "universidad" : "colegio secundaria"}?`;
+      : `¿Cambiar «${i.nombre}» a ${uniV ? v : "colegio " + v}?`;
     if (!confirm(aviso)) return;
-    await rpc("cambiar_tipo_institucion", { p_id: i.id, p_tipo: v === "universidad" ? "universidad" : "colegio", p_nivel: v === "universidad" ? null : v });
+    await rpc("cambiar_tipo_institucion", { p_id: i.id, p_tipo: uniV ? "universidad" : "colegio", p_nivel: uniV ? null : v, p_instituto: v === "instituto" });
     await recargarTodo(); toast("Tipo actualizado.");
   },
   async "inst-del"(d) {
@@ -1904,7 +1905,7 @@ document.addEventListener("submit", ev => {
       await recargarTodo(); mostrarCredenciales(v);
     } else if (f.id === "fInst") {
       if (d.workspace === "si" && !(d.dominio || "").trim()) falla("Si la institución ya tiene Google Workspace, escribe su dominio (por ejemplo midominio.edu).");
-      const nuevaId = await rpc("crear_institucion", { p_nombre: d.nombre, p_vence: d.vence || null, p_tipo: d.tipo === "universidad" ? "universidad" : "colegio", p_nivel: d.tipo === "secundaria" ? "secundaria" : "primaria" });
+      const nuevaId = await rpc("crear_institucion", { p_nombre: d.nombre, p_vence: d.vence || null, p_tipo: d.tipo === "universidad" || d.tipo === "instituto" ? "universidad" : "colegio", p_nivel: d.tipo === "secundaria" ? "secundaria" : "primaria", p_instituto: d.tipo === "instituto" });
       if ((d.dominio || "").trim()) await rpc("actualizar_dominio", { p_inst: nuevaId, p_dominio: d.dominio }); await recargarTodo(); toast(d.workspace === "si" ? "Institución creada. Ahora crea su administrador: él conectará su Google Workspace en «Correo institucional»." : "Institución creada. Ahora crea su administrador.");
     } else if (f.id === "fMant") {
       const pausar = !yo.mantenimiento;

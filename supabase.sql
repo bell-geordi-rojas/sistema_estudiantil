@@ -58,6 +58,8 @@ alter table instituciones add column if not exists dominio text      -- dominio 
 -- Si esta activa, al registrar a alguien tambien se crea su cuenta REAL de Google Workspace (usuario@dominio) con el script de la institucion
 alter table instituciones add column if not exists google_workspace boolean not null default false;
 alter table instituciones add column if not exists tipo text not null default 'colegio' check (tipo in ('colegio', 'universidad'));
+-- Instituto: funciona igual que una universidad (carreras, ciclos, notas con peso) pero se muestra con el nombre de instituto
+alter table instituciones add column if not exists instituto boolean not null default false;
 
 create table if not exists perfiles (
   id uuid primary key references auth.users (id) on delete cascade,
@@ -701,7 +703,7 @@ begin
     'correo', exists (select 1 from instituciones_correo where institucion_id = p.institucion_id)
               or (exists (select 1 from config where clave = 'correo_url') and exists (select 1 from config where clave = 'correo_secreto')),
     'institucion', case when i.id is null then null
-                        else jsonb_build_object('id', i.id, 'nombre', i.nombre, 'slug', i.slug, 'vence', i.vence, 'tipo', i.tipo, 'nivel', i.nivel, 'dominio', i.dominio,
+                        else jsonb_build_object('id', i.id, 'nombre', i.nombre, 'slug', i.slug, 'vence', i.vence, 'tipo', i.tipo, 'instituto', i.instituto, 'nivel', i.nivel, 'dominio', i.dominio,
                                                   'correo_propio', exists (select 1 from instituciones_correo where institucion_id = i.id),
                                                   'google', i.google_workspace) end,
     'permisos', (select jsonb_object_agg(k, permiso(k)) from unnest(claves_permiso()) as k));
@@ -967,7 +969,8 @@ end $$;
 
 drop function if exists crear_institucion(text, date);
 drop function if exists crear_institucion(text, date, text);
-create or replace function crear_institucion(p_nombre text, p_vence date default null, p_tipo text default 'colegio', p_nivel text default 'primaria') returns bigint
+drop function if exists crear_institucion(text, date, text, text);
+create or replace function crear_institucion(p_nombre text, p_vence date default null, p_tipo text default 'colegio', p_nivel text default 'primaria', p_instituto boolean default false) returns bigint
 language plpgsql security definer set search_path = public as $$
 declare base text; v_slug text; v_id bigint; n int := 1;
 begin
@@ -980,7 +983,7 @@ begin
   if base = '' then base := 'Institucion'; end if;
   v_slug := base;
   while exists (select 1 from instituciones where slug = v_slug) loop n := n + 1; v_slug := base || '_' || n; end loop;
-  insert into instituciones (nombre, slug, vence, tipo, nivel) values (p_nombre, v_slug, p_vence, p_tipo, coalesce(p_nivel, 'primaria')) returning id into v_id;
+  insert into instituciones (nombre, slug, vence, tipo, nivel, instituto) values (p_nombre, v_slug, p_vence, p_tipo, coalesce(p_nivel, 'primaria'), (p_tipo = 'universidad' and coalesce(p_instituto, false))) returning id into v_id;
   perform _sembrar_institucion(v_id);
   if _por_curso(v_id) then update instituciones set migrado_cursos = true where id = v_id; end if;   -- institucion nueva: nada que migrar
   return v_id;
@@ -1001,13 +1004,14 @@ end $$;
 
 -- Colegio <-> universidad (al volver a colegio, todos los pesos quedan en 1)
 drop function if exists cambiar_tipo_institucion(bigint, text);
-create or replace function cambiar_tipo_institucion(p_id bigint, p_tipo text, p_nivel text default null) returns void
+drop function if exists cambiar_tipo_institucion(bigint, text, text);
+create or replace function cambiar_tipo_institucion(p_id bigint, p_tipo text, p_nivel text default null, p_instituto boolean default false) returns void
 language plpgsql security definer set search_path = public as $$
 begin
   if mi_rol() is distinct from 'dueno' then raise exception 'No autorizado.'; end if;
   if p_tipo not in ('colegio', 'universidad') then raise exception 'Tipo de institucion invalido.'; end if;
   if p_nivel is not null and p_nivel not in ('primaria', 'secundaria') then raise exception 'Nivel invalido.'; end if;
-  update instituciones set tipo = p_tipo, nivel = coalesce(p_nivel, nivel) where id = p_id;
+  update instituciones set tipo = p_tipo, nivel = coalesce(p_nivel, nivel), instituto = (p_tipo = 'universidad' and coalesce(p_instituto, false)) where id = p_id;
   if not found then raise exception 'Institucion no encontrada.'; end if;
   if p_tipo = 'universidad' then perform _asegurar_ciclos(p_id); perform _sembrar_carreras(p_id); end if;
   if p_tipo = 'colegio' then
