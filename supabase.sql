@@ -1074,7 +1074,7 @@ begin
                                'correo_institucional', p_correo_inst, 'usuario', p_usuario, 'codigo', p_codigo, 'institucion', v_nom, 'rol', p_rol,
                                'crear_google', (p_clave_google is not null and v_propio),   -- la cuenta de Google solo se crea con el script de la propia institucion
                                'clave_google', case when v_propio then p_clave_google end,
-                               'app', 'https://bell786u-ctrl.github.io/sistema_estudiantil/'));
+                               'app', 'https://bell-geordi-rojas.github.io/sistema_estudiantil/'));
   return true;
 exception when others then
   return false;

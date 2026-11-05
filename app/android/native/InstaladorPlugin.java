@@ -26,7 +26,7 @@ public class InstaladorPlugin extends Plugin {
     @PluginMethod
     public void instalar(final PluginCall call) {
         final String url = call.getString("url");
-        if (url == null || !url.startsWith("https://github.com/bell786u-ctrl/sistema_estudiantil/")) {
+        if (url == null || !url.startsWith("https://github.com/bell-geordi-rojas/sistema_estudiantil/")) {
             call.reject("Dirección de descarga no válida.");
             return;
         }

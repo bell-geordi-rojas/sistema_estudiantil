@@ -349,8 +349,8 @@ function fila(k, v) { return '<tr><td style="padding:6px 14px 6px 0;color:#6b728
 function limpiar(t) { return String(t == null ? "" : t).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }`;
 // Programas para descargar (los publica el workflow «Compilar programas» en la versión app-latest de GitHub)
 const DESCARGAS = {
-  android: "https://github.com/bell786u-ctrl/sistema_estudiantil/releases/download/app-latest/SINEVA.apk",
-  pc: "https://github.com/bell786u-ctrl/sistema_estudiantil/releases/download/app-latest/SINEVA-Setup.exe",
+  android: "https://github.com/bell-geordi-rojas/sistema_estudiantil/releases/download/app-latest/SINEVA.apk",
+  pc: "https://github.com/bell-geordi-rojas/sistema_estudiantil/releases/download/app-latest/SINEVA-Setup.exe",
 };
 const EN_APP = /EstudiantilApp/.test(navigator.userAgent);   // dentro del programa de PC o de Android no se ofrece la descarga
 const VERSION_APP = (navigator.userAgent.match(/EstudiantilApp\/([\d.]+)/) || [])[1] || (EN_APP ? "0.0.0" : "");   // versión del programa instalado

@@ -4,9 +4,9 @@
   "webDir": "www",
   "backgroundColor": "#0f1420",
   "server": {
-    "url": "https://bell786u-ctrl.github.io/sistema_estudiantil/",
+    "url": "https://bell-geordi-rojas.github.io/sistema_estudiantil/",
     "cleartext": false,
-    "allowNavigation": ["bell786u-ctrl.github.io"],
+    "allowNavigation": ["bell-geordi-rojas.github.io"],
     "errorPath": "offline.html"
   },
   "android": {

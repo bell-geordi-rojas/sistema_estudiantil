@@ -4,7 +4,7 @@ const { app, BrowserWindow, Menu, shell, session } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("path");
 
-const URL_APP = "https://bell786u-ctrl.github.io/sistema_estudiantil/";
+const URL_APP = "https://bell-geordi-rojas.github.io/sistema_estudiantil/";
 const ORIGEN = new URL(URL_APP).origin;
 const seguro = u => /^https:\/\//i.test(u);   // solo se abren enlaces https fuera del programa
 

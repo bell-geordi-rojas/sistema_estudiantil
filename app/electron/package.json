@@ -46,7 +46,7 @@
                   "publish":  [
                                   {
                                       "provider":  "generic",
-                                      "url":  "https://github.com/bell786u-ctrl/sistema_estudiantil/releases/download/app-latest"
+                                      "url":  "https://github.com/bell-geordi-rojas/sistema_estudiantil/releases/download/app-latest"
                                   }
                               ]
               },
