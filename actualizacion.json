@@ -1,5 +1,5 @@
 {
-  "requerida": "1.8.1",
+  "requerida": "1.8.2",
   "android": "https://github.com/bell-geordi-rojas/sistema_estudiantil/releases/download/app-latest/SINEVA.apk",
   "pc": "https://github.com/bell-geordi-rojas/sistema_estudiantil/releases/download/app-latest/SINEVA-Setup.exe"
 }
