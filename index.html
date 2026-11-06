@@ -38,6 +38,8 @@ header{background:var(--teal);color:#fff;min-height:56px;display:flex;align-item
 .logo{font-weight:800;font-size:20px;letter-spacing:.5px;display:flex;align-items:center;gap:8px}
 .logo i{width:28px;height:28px;border-radius:50%;background:#fff;display:inline-block;position:relative}
 .logo i::after{content:"";position:absolute;inset:7px;border-radius:50%;background:#1f6feb}
+.logo.clic{cursor:pointer;border-radius:10px;padding:2px 8px 2px 4px;margin:-2px 0;transition:background .15s}
+.logo.clic:hover,.logo.clic:focus-visible{background:rgba(255,255,255,.18);outline:none}
 header .sp{flex:1}
 .user{display:flex;align-items:center;gap:10px;font-size:13px}
 .user small{display:block;opacity:.85;font-size:11px}
@@ -1365,8 +1367,9 @@ function vCuenta() {
     <label>Apellidos<input name="apellidos" value="${esc(yo.apellidos || "")}" maxlength="80"></label></div>
     ${yo.rol === "alumno" ? `<small>Tu nombre también se actualiza en la lista de estudiantes de tu docente.</small>` : ""}
     <div class="err"></div><div><button class="btn">Guardar nombre</button></div></form></div>
-    <div class="card"><h2>Apariencia</h2><p style="margin-top:0;color:var(--mute)">Efectos visuales: fundido entre pantallas, ventanas que crecen desde su tarjeta, desenfoque y zoom al pasar el cursor. Si te molestan o el equipo va lento, apágalos.</p>
-    <button class="btn ${efectosActivos() ? "sec" : ""}" data-a="efectos">${efectosActivos() ? "Desactivar efectos visuales" : "Activar efectos visuales"}</button></div>
+    <div class="card"><h2>Apariencia</h2><p style="margin-top:0;color:var(--mute)">Efectos visuales: fundido entre pantallas, ventanas que crecen desde su tarjeta, desenfoque y zoom al pasar el cursor. Si te molestan o el equipo va lento, apágalos. También hay sonidos suaves al tocar botones y al terminar un proceso.</p>
+    <div class="bar"><button class="btn ${efectosActivos() ? "sec" : ""}" data-a="efectos">${efectosActivos() ? "Desactivar efectos visuales" : "Activar efectos visuales"}</button>
+    <button class="btn ${sonidosActivos() ? "sec" : ""}" data-a="sonidos">${sonidosActivos() ? "Desactivar sonidos" : "Activar sonidos"}</button></div></div>
     <div class="card"><h2>Cambiar contraseña</h2><form class="form" id="fPass"><label>Nueva contraseña (mín. 8, con letras y números)<input type="password" name="a" minlength="8" required autocomplete="new-password"></label>${medidorHTML()}
     <label>Repite la contraseña<input type="password" name="b" minlength="8" required autocomplete="new-password"></label>
     <div class="err"></div><div><button class="btn">Cambiar contraseña</button></div></form></div>`;
@@ -1395,7 +1398,7 @@ async function subirFoto(archivo) {
 /* ===== Pantallas ===== */
 function cabecera(conUsuario, menu = "") {
   const sub = yo && yo.institucion ? yo.institucion.nombre : "Propietario";
-  return `<header><div class="logo"><i></i>SINEVA</div><div class="sp"></div>
+  return `<header><div class="logo${yo && yo.acceso ? " clic" : ""}" ${yo && yo.acceso ? `data-v="panel" role="button" tabindex="0" title="Ir al menú principal"` : ""}><i></i>SINEVA</div><div class="sp"></div>
     <button class="hbtn" data-a="tema" title="Cambiar entre modo claro y oscuro">${temaActual() === "dark" ? "☀<span class=\"txt\"> Modo claro</span>" : "☾<span class=\"txt\"> Modo oscuro</span>"}</button>${conUsuario && yo && yo.acceso ? `<button class="hbtn" id="campana" data-a="campana" title="Avisos">🔔<span>${sinLeer() ? " " + sinLeer() : ""}</span></button>` : ""}${menu ? `<div class="menuwrap"><button class="hbtn menubtn" data-a="menu" aria-label="Menú" title="Menú">⋮</button><div class="menupop" id="menuPop">${menu}</div></div>` : ""}
     ${conUsuario ? `<div class="user${yo.acceso ? " clic" : ""}" ${yo.acceso ? `data-v="cuenta" role="button" tabindex="0" title="Abrir Mi cuenta"` : ""}>${avatarDe(nombreCompleto(yo), yo.usuario, yo.id)}<div>${esc(nombreCompleto(yo))}<small>${ROL[yo.rol]} · ${esc(sub)}</small></div></div><button class="hbtn" data-a="salir">Salir</button>` : ""}</header>`;
 }
@@ -1837,11 +1840,33 @@ function proceso(titulo, pasos, mensaje) {
   return {
     paso(i, msg) { marcar(i); if (msg) q(".pc-msg").textContent = msg; },
     nivel(ev) { const b = q(".pc-nivel"); b.hidden = false; b.querySelectorAll(".pc-seg i").forEach((x, k) => { x.className = k < ev.nivel ? "n" + ev.nivel : ""; }); b.querySelector("b").textContent = ev.etiqueta; },
-    ok(msg) { fin("ok", msg, 3500); },
-    error(msg) { fin("error", msg, 8000); },
+    ok(msg) { fin("ok", msg, 3500); sonar("ok"); },
+    error(msg) { fin("error", msg, 8000); sonar("error"); },
   };
 }
-document.addEventListener("keydown", ev => { if ((ev.key === "Enter" || ev.key === " ") && ev.target.matches && ev.target.matches(".user.clic")) { ev.preventDefault(); irA("cuenta"); } });   // la foto y el nombre del encabezado abren «Mi cuenta» también con el teclado
+document.addEventListener("keydown", ev => { if ((ev.key === "Enter" || ev.key === " ") && ev.target.matches && ev.target.matches(".user.clic, .logo.clic")) { ev.preventDefault(); irA(ev.target.matches(".logo") ? "panel" : "cuenta"); } });   // la foto y el nombre del encabezado abren «Mi cuenta» también con el teclado
+/* ===== Sonidos suaves al tocar: se sintetizan con Web Audio (no hay archivos) y se apagan en «Mi cuenta» ===== */
+const sonidosActivos = () => { try { return localStorage.getItem("sonidos") !== "off"; } catch { return true; } };
+let ctxAudio = null, ultimoSonido = 0;
+const NOTAS_SONIDO = { tap: [[760, 0, .05, .04]], abrir: [[520, 0, .06, .04], [780, .05, .12, .04]], ok: [[660, 0, .09, .06], [990, .09, .2, .06]], error: [[260, 0, .14, .06], [200, .12, .28, .06]] };
+function sonar(tipo = "tap") {
+  if (!sonidosActivos()) return;
+  try {
+    const ahora = Date.now(); if (tipo === "tap" && ahora - ultimoSonido < 45) return; ultimoSonido = ahora;   // un clic compuesto (etiqueta + casilla) suena una sola vez
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    ctxAudio = ctxAudio || new AC(); if (ctxAudio.state === "suspended") ctxAudio.resume();
+    const t0 = ctxAudio.currentTime;
+    for (const [f, ini, fin, vol] of NOTAS_SONIDO[tipo] || []) {
+      const o = ctxAudio.createOscillator(), g = ctxAudio.createGain(); o.type = tipo === "error" ? "triangle" : "sine"; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0 + ini); g.gain.exponentialRampToValueAtTime(vol, t0 + ini + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t0 + fin);
+      o.connect(g).connect(ctxAudio.destination); o.start(t0 + ini); o.stop(t0 + fin + 0.02);
+    }
+  } catch {}
+}
+document.addEventListener("click", ev => {
+  const e = ev.target.closest && ev.target.closest("button, a[href], summary, [data-a], [data-v], .ccard, input[type=checkbox], input[type=radio], label.chk");
+  if (e && !e.disabled && !e.closest("[disabled]")) sonar(e.matches("summary, .ccard") ? "abrir" : "tap");
+}, true);
 /* ===== Desplegables: al abrir uno se cierra el que estaba abierto en el mismo grupo (avisos legales, periodos de un curso, docentes, directorio…) ===== */
 document.addEventListener("click", ev => {
   const s = ev.target.closest("details.acc > summary"); if (!s) return;
@@ -2105,7 +2130,8 @@ const acciones = {
       const activa = $("#dlgBody .tabs button.on");
       if (dlg.open && activa && activa.dataset.id === "personas") $("#dlgBody").innerHTML = htmlCurso(c, "personas");
     } catch {}
-  },  efectos() { const on = !efectosActivos(); document.documentElement.dataset.efectos = on ? "on" : "off"; guardarLocal("efectos", on ? "on" : "off"); render(); toast(on ? "Efectos visuales activados." : "Efectos visuales desactivados."); },
+  },  sonidos() { const on = !sonidosActivos(); guardarLocal("sonidos", on ? "on" : "off"); render(); if (on) sonar("ok"); toast(on ? "Sonidos activados." : "Sonidos desactivados."); },
+  efectos() { const on = !efectosActivos(); document.documentElement.dataset.efectos = on ? "on" : "off"; guardarLocal("efectos", on ? "on" : "off"); render(); toast(on ? "Efectos visuales activados." : "Efectos visuales desactivados."); },
   async "correo-copiar-script"() { await copiar(SCRIPT_CORREO); },
   "correo-generar"() { const c = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789", b = crypto.getRandomValues(new Uint8Array(28)); $("#correoSecreto").value = [...b].map(x => c[x % c.length]).join(""); toast("Clave generada: cópiala en la propiedad SECRETO del script."); },
   async "correo-copiar-clave"() { const v = $("#correoSecreto").value; if (v) await copiar(v); else toast("Primero genera o escribe la clave."); },
