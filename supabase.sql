@@ -576,6 +576,35 @@ create or replace function _comparten_curso(p_est bigint) returns boolean langua
                  where a.estudiante_id = p_est and b.estudiante_id = (select id from estudiantes where perfil_id = auth.uid())) $$;
 create or replace function _comparten_perfil(p_perfil uuid) returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from estudiantes e where e.perfil_id = p_perfil and _comparten_curso(e.id)) $$;
+-- ---------------------------------------------------------------------------
+-- AUTORIZACION A NIVEL DE OBJETO (contra BOLA / IDOR): el token solo dice QUIEN eres; aqui se comprueba que el objeto pedido
+-- (por su id) es TUYO o de tu institucion y que tu rol te deja tocarlo. Se llama al inicio de cada funcion que recibe un id.
+-- Da el mismo mensaje si el objeto no existe o si es de otro: asi no se pueden descubrir ids ajenos probando numeros.
+-- ---------------------------------------------------------------------------
+create or replace function _autorizar(p_tabla text, p_id bigint) returns void
+language plpgsql stable security definer set search_path = public as $$
+declare ok boolean := false; r text := mi_rol(); i bigint := mi_inst(); u uuid := auth.uid();
+begin
+  if r is null or p_id is null then raise exception 'No autorizado.'; end if;
+  if r = 'dueno' then return; end if;
+  ok := coalesce(case p_tabla
+    when 'curso'   then exists (select 1 from cursos   where id = p_id and institucion_id = i)
+    when 'periodo' then exists (select 1 from periodos where id = p_id and institucion_id = i)
+    when 'carrera' then exists (select 1 from carreras where id = p_id and institucion_id = i)
+    when 'grado'   then exists (select 1 from grados   where id = p_id and institucion_id = i)
+    when 'anuncio' then exists (select 1 from anuncios where id = p_id and institucion_id = i)
+    when 'tarea' then exists (select 1 from tareas t where t.id = p_id and t.institucion_id = i
+        and (r = 'admin' or (r = 'docente' and (t.docente_id = u or _ensena(t.curso_id))) or (r = 'alumno' and _tarea_para_mi(t.id))))
+    when 'archivo' then exists (select 1 from tarea_archivos a where a.id = p_id and a.institucion_id = i
+        and (r = 'admin' or a.subido_por = u or (r = 'docente' and _ensena(a.curso_id))
+             or (r = 'alumno' and a.estudiante_id in (select id from estudiantes where perfil_id = u))))
+    when 'estudiante' then exists (select 1 from estudiantes e where e.id = p_id and e.institucion_id = i
+        and (r = 'admin' or (r = 'docente' and (_puedo_gestionar(e.id) or _docente_ve_est(e.id))) or (r = 'alumno' and e.perfil_id = u)))
+    when 'nota' then exists (select 1 from notas n join estudiantes e on e.id = n.estudiante_id where n.id = p_id and e.institucion_id = i
+        and (r = 'admin' or (r = 'docente' and _puedo_calificar(n.estudiante_id, n.curso_id))))
+    else false end, false);
+  if not ok then raise exception 'No autorizado.'; end if;
+end $$;
 -- Companeros del alumno actual (una sola consulta, no una por fila)
 create or replace function _companeros_est() returns setof bigint language sql stable security definer set search_path = public as $$
   select distinct a.estudiante_id from inscripciones a
@@ -1427,6 +1456,7 @@ end $$;
 create or replace function renombrar_curso(p_id bigint, p_nombre text) returns void
 language plpgsql security definer set search_path = public as $$
 begin
+  perform _autorizar('curso', p_id);
   if not _puede_cursos() then raise exception 'No autorizado.'; end if;
   p_nombre := trim(coalesce(p_nombre, ''));
   if p_nombre = '' or length(p_nombre) > 80 then raise exception 'Escribe el nombre del curso (maximo 80 caracteres).'; end if;
@@ -1440,6 +1470,7 @@ end $$;
 create or replace function eliminar_curso(p_id bigint) returns void
 language plpgsql security definer set search_path = public as $$
 begin
+  perform _autorizar('curso', p_id);
   if not _puede_cursos() then raise exception 'No autorizado.'; end if;
   delete from cursos where id = p_id and institucion_id = mi_inst();
   if not found then raise exception 'Curso no encontrado.'; end if;
@@ -1463,6 +1494,7 @@ end $$;
 create or replace function renombrar_periodo(p_id bigint, p_nombre text) returns void
 language plpgsql security definer set search_path = public as $$
 begin
+  perform _autorizar('periodo', p_id);
   if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
   if (select tipo from instituciones where id = mi_inst()) = 'universidad' then raise exception 'Las universidades tienen 14 ciclos fijos.'; end if;
   p_nombre := trim(coalesce(p_nombre, ''));
@@ -1476,6 +1508,7 @@ end $$;
 create or replace function eliminar_periodo(p_id bigint) returns void
 language plpgsql security definer set search_path = public as $$
 begin
+  perform _autorizar('periodo', p_id);
   if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
   if (select tipo from instituciones where id = mi_inst()) = 'universidad' then raise exception 'Las universidades tienen 14 ciclos fijos.'; end if;
   if (select count(*) from periodos where institucion_id = mi_inst()) <= 1 then raise exception 'Debe quedar al menos un periodo.'; end if;
@@ -1612,6 +1645,7 @@ create or replace function eliminar_estudiante(p_id bigint) returns void
 language plpgsql security definer set search_path = public as $$
 declare v_perfil uuid;
 begin
+  perform _autorizar('estudiante', p_id);
   if not permiso('eliminar') or not _puedo_gestionar(p_id) then raise exception 'No autorizado.'; end if;
   perform _evento('estudiante_eliminado', 'Estudiante ' || p_id, 'info');
   if random() < 0.05 then delete from papelera where creado < now() - interval '60 days'; end if;
@@ -1661,6 +1695,7 @@ create or replace function eliminar_nota(p_id bigint) returns void
 language plpgsql security definer set search_path = public as $$
 declare v_est bigint; v_cur bigint;
 begin
+  perform _autorizar('nota', p_id);
   select estudiante_id, curso_id into v_est, v_cur from notas where id = p_id;
   if v_est is null or not permiso('editar_notas') or not _puedo_calificar(v_est, v_cur) then raise exception 'No autorizado.'; end if;
   perform _notificar_est(v_est, 'eliminó una de tus notas en «' || (select nombre from cursos where id = v_cur) || '».');
@@ -1689,6 +1724,7 @@ end $$;
 create or replace function editar_carrera(p_id bigint, p_nombre text, p_ciclos int) returns void
 language plpgsql security definer set search_path = public as $$
 begin
+  perform _autorizar('carrera', p_id);
   if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
   p_nombre := trim(coalesce(p_nombre, ''));
   if length(p_nombre) < 2 or length(p_nombre) > 80 then raise exception 'Escribe el nombre de la carrera.'; end if;
@@ -1703,6 +1739,7 @@ end $$;
 create or replace function eliminar_carrera(p_id bigint) returns void
 language plpgsql security definer set search_path = public as $$
 begin
+  perform _autorizar('carrera', p_id);
   if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
   if exists (select 1 from estudiantes where carrera_id = p_id) then raise exception 'Hay estudiantes en esa carrera: pasalos a otra antes de eliminarla.'; end if;
   delete from carreras where id = p_id and institucion_id = mi_inst();
@@ -1878,6 +1915,7 @@ end $$;
 
 create or replace function eliminar_grado(p_id bigint) returns void language plpgsql security definer set search_path = public as $$
 begin
+  perform _autorizar('grado', p_id);
   if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
   if exists (select 1 from estudiantes where grado_id = p_id) then raise exception 'Primero pasa a los alumnos de este grado a otro.'; end if;
   delete from grados where id = p_id and institucion_id = mi_inst();
@@ -1971,6 +2009,7 @@ end $$;
 
 create or replace function eliminar_anuncio(p_id bigint) returns void language plpgsql security definer set search_path = public as $$
 begin
+  perform _autorizar('anuncio', p_id);
   if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
   delete from anuncios where id = p_id and institucion_id = mi_inst();
 end $$;
@@ -2077,6 +2116,7 @@ create or replace function ampliar_plazo(p_tarea bigint, p_limite timestamptz) r
 language plpgsql security definer set search_path = public as $$
 declare t tareas;
 begin
+  perform _autorizar('tarea', p_tarea);
   select * into t from tareas where id = p_tarea;
   if not found then raise exception 'Tarea no encontrada.'; end if;
   if mi_rol() is distinct from 'docente' or not _tarea_visible(t.curso_id, t.docente_id) then raise exception 'No autorizado: solo el docente de la tarea puede ampliar el plazo.'; end if;
@@ -2093,6 +2133,7 @@ create or replace function eliminar_tarea(p_id bigint) returns void
 language plpgsql security definer set search_path = public as $$
 declare t tareas;
 begin
+  perform _autorizar('tarea', p_id);
   select * into t from tareas where id = p_id;
   if not found then raise exception 'Tarea no encontrada.'; end if;
   if not ((mi_rol() = 'admin' and t.institucion_id = mi_inst()) or (mi_rol() = 'docente' and t.docente_id = auth.uid())) then raise exception 'No autorizado.'; end if;
@@ -2151,6 +2192,7 @@ create or replace function eliminar_archivo(p_id bigint) returns void
 language plpgsql security definer set search_path = public as $$
 declare a tarea_archivos;
 begin
+  perform _autorizar('archivo', p_id);
   select * into a from tarea_archivos where id = p_id;
   if not found then raise exception 'Archivo no encontrado.'; end if;
   if not ((mi_rol() = 'admin' and a.institucion_id = mi_inst()) or a.subido_por = auth.uid()) then raise exception 'No autorizado.'; end if;
@@ -2381,7 +2423,7 @@ begin
   for f in select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname = any (array[
              '_generar_usuario', '_crear_invitacion', '_puede_resolver_solicitud', '_puede_invitacion', '_puedo_gestionar', '_alcance_perfil', 'crear_invitacion_dueno',
-             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario', '_enviar_credenciales', 'configurar_correo', '_sembrar_carreras', '_migrar_a_cursos', '_ciclos_defecto', '_puedo_calificar', '_autoinscribir_estudiante', '_autoinscribir_curso', '_notificar', '_notificar_est', '_notificar_curso', '_sembrar_grados', '_evento', '_limitar', '_t_borrado_masivo', '_t_notas_masivas', '_cerrar_vencidas', '_alumnos_tarea', '_notificar_tarea'])
+             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario', '_enviar_credenciales', 'configurar_correo', '_sembrar_carreras', '_migrar_a_cursos', '_ciclos_defecto', '_puedo_calificar', '_autoinscribir_estudiante', '_autoinscribir_curso', '_notificar', '_notificar_est', '_notificar_curso', '_sembrar_grados', '_evento', '_limitar', '_t_borrado_masivo', '_t_notas_masivas', '_cerrar_vencidas', '_alumnos_tarea', '_notificar_tarea', '_autorizar'])
   loop
     execute format('revoke all on function %s from public, anon, authenticated', f);
   end loop;
