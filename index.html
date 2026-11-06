@@ -1777,11 +1777,12 @@ function montarLegal() {
 avisoAlmacenamiento();
 /* ===== Tareas: el docente crea carpetas con material y los alumnos entregan su trabajo (PDF o Word) ===== */
 const SEL_TAREAS = ["tareas?select=id,curso_id,docente_id,titulo,descripcion,limite,creado,periodo_id,peso,cero_auto,cerrada,grados&order=creado.desc",
-  "tarea_archivos?select=id,curso_id,tarea_id,tipo,estudiante_id,subido_por,nombre,mime,tam,creado&order=creado"];
+  "tarea_archivos?select=id,curso_id,tarea_id,tipo,estudiante_id,subido_por,nombre,mime,tam,creado,descripcion&order=creado"];
+const SEL_ARCH_BASE = "tarea_archivos?select=id,curso_id,tarea_id,tipo,estudiante_id,subido_por,nombre,mime,tam,creado&order=creado";   // por si la base aún no tiene la descripción
 const SEL_TAREAS_BASE = "tareas?select=id,curso_id,docente_id,titulo,descripcion,limite,creado&order=creado.desc";   // por si la base aún no tiene las columnas nuevas
 async function recargarTareas() {
   let cerradas = 0; try { cerradas = (await rpc("cerrar_tareas_vencidas")) || 0; } catch {}   // las tareas vencidas sin entrega reciben nota 0
-  const [a, b] = await Promise.all([sel(SEL_TAREAS[0]).catch(() => sel(SEL_TAREAS_BASE)).catch(() => []), sel(SEL_TAREAS[1]).catch(() => [])]);
+  const [a, b] = await Promise.all([sel(SEL_TAREAS[0]).catch(() => sel(SEL_TAREAS_BASE)).catch(() => []), sel(SEL_TAREAS[1]).catch(() => sel(SEL_ARCH_BASE)).catch(() => [])]);
   tareas = a; archivos = b;
   if (cerradas > 0) { try { await recargarEst(); } catch {} }
 }
@@ -1826,6 +1827,7 @@ function formTarea(cursoFijo) {
   return `<form id="fTarea" class="card" style="margin:0 0 14px"><h2 style="margin-top:0">Nueva carpeta</h2>
     ${cursoFijo ? `<input type="hidden" name="curso" value="${cursoFijo.id}">` : `<label style="${L}"><span>Curso (los que tienes asignados)</span><select name="curso" required>${cs.map(c => `<option value="${c.id}">${esc(c.nombre)}${etiquetaCurso(c) ? " · " + esc(etiquetaCurso(c)) : ""}</option>`).join("")}</select></label>`}
     <div style="display:grid;gap:8px;margin-bottom:12px">${opcion("tarea", "Tarea", "Los alumnos entregan su trabajo y reciben nota.", true)}${opcion("info", "Documento de información", "Solo para leer o estudiar: no se entrega ni tiene nota.", false)}</div>
+    <div data-solo="info" hidden><label style="${L}">Descripción (opcional)<textarea name="descdoc" rows="2" maxlength="300" disabled placeholder="p. ej. Lectura para el examen del viernes"></textarea></label></div>
     <div data-solo="tarea"><div id="campoGrados">${campoGrados(cursoFijo || cs[0])}</div><label style="${L}">Título de la tarea<input name="titulo" maxlength="120" required placeholder="p. ej. Informe de la unidad 2"></label>
     <label style="${L}">Instrucciones (opcional)<textarea name="descripcion" rows="3" maxlength="2000"></textarea></label>
     <div class="row2"><label style="${L}">Fecha límite (opcional)<input type="datetime-local" name="limite"></label>
@@ -1863,7 +1865,7 @@ function formPlazo(t) {
 }
 function tareasTab(c) {
   const ts = tareasDeCurso(c), staff = yo.rol === "docente", sueltos = archivos.filter(a => a.tipo === "material" && a.curso_id === c.id && !a.tarea_id);
-  const apoyo = sueltos.length ? `<div class="scroll"><table><tbody>${sueltos.map(a => `<tr><td>${etiquetaApoyo}${esc(a.nombre)}<small style="display:block;color:var(--mute)">${fmtTam(a.tam || 0)} · ${fechaHora(a.creado)}</small></td>
+  const apoyo = sueltos.length ? `<div class="scroll"><table><tbody>${sueltos.map(a => `<tr><td>${etiquetaApoyo}<b>${esc(a.nombre)}</b>${a.descripcion ? `<div style="font-size:13px;margin-top:2px">${esc(a.descripcion)}</div>` : ""}<small style="display:block;color:var(--mute)">${fmtTam(a.tam || 0)} · ${fechaHora(a.creado)}</small></td>
     <td style="text-align:right;white-space:nowrap"><button class="btn sm sec" data-a="archivo-bajar" data-id="${a.id}">Descargar</button>${staff ? ` <button class="btn sm sec" data-a="archivo-borrar" data-id="${a.id}">✕</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Aún no hay documentos de información.</div>`;
   return `<div data-cursotab="${c.id}">
     <h2 style="font-size:16px;margin:4px 0 2px">Tareas <small>${ts.length}</small></h2><p style="margin:0 0 8px;color:var(--mute);font-size:12px">Se entregan y tienen nota.</p>
@@ -1910,7 +1912,7 @@ const docsInfo = () => archivos.filter(a => a.tipo === "material" && !a.tarea_id
 function filaDoc(a, borrar) {
   const c = cursoDe(a.curso_id);
   return `<div class="card" style="margin:0 0 10px;padding:12px 14px;border-left:3px solid var(--mute);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-    <div>${etiquetaApoyo}<b>${esc(a.nombre)}</b><small style="display:block;color:var(--mute)">${c ? esc(c.nombre) + " · " : ""}${fmtTam(a.tam || 0)} · ${fechaHora(a.creado)}</small></div>
+    <div>${etiquetaApoyo}<b>${esc(a.nombre)}</b>${a.descripcion ? `<div style="font-size:13px;margin-top:2px">${esc(a.descripcion)}</div>` : ""}<small style="display:block;color:var(--mute)">${c ? esc(c.nombre) + " · " : ""}${fmtTam(a.tam || 0)} · ${fechaHora(a.creado)}</small></div>
     <div style="display:flex;gap:8px"><button class="btn sm sec" data-a="archivo-bajar" data-id="${a.id}">Descargar</button>${borrar ? `<button class="btn sm sec" data-a="archivo-borrar" data-id="${a.id}">Quitar</button>` : ""}</div></div>`;
 }
 function vTareas() {
@@ -2282,6 +2284,7 @@ document.addEventListener("change", ev => {
   else if (t.name === "tipo" && t.closest("#fTarea")) {   // tarea o documento de información: se muestran solo los campos que corresponden
     const fm = t.closest("form"), info = fm.tipo.value === "info", solo = fm.querySelector("[data-solo=tarea]");
     solo.hidden = info; solo.querySelectorAll("input,select,textarea").forEach(x => { x.disabled = info; });
+    const dd = fm.querySelector("[data-solo=info]"); dd.hidden = !info; dd.querySelectorAll("textarea").forEach(x => { x.disabled = !info; });
     fm.titulo.required = !info; fm.archivo.required = info;
     $("#pistaArchivo").textContent = info ? "obligatorio" : "opcional: se sube junto con la tarea"; fm.querySelector("button.btn").textContent = info ? "Subir documento de información" : "Crear carpeta";
   }
@@ -2344,10 +2347,10 @@ document.addEventListener("submit", ev => {
 
       const file = d.archivo && d.archivo.size ? d.archivo : null, curso = Number(d.curso);
       if (file && file.size > MAX_ARCHIVO) falla("El archivo pesa " + fmtTam(file.size) + ": el máximo es 4 MB.");
-      const subir = (tarea) => leerBase64(file).then(b64 => rpc("subir_archivo", { p_curso: curso, p_tarea: tarea, p_tipo: "material", p_nombre: file.name, p_mime: file.type || "", p_contenido: b64 }));
+      const subir = (tarea, desc) => leerBase64(file).then(b64 => rpc("subir_archivo", { p_curso: curso, p_tarea: tarea, p_tipo: "material", p_nombre: file.name, p_mime: file.type || "", p_contenido: b64, p_descripcion: desc || null }));
       if (d.tipo === "info") {
         if (!file) falla("Elige el documento que quieres compartir.");
-        await subir(null); await recargarTareas(); repintarTareas(); toast("Documento de información publicado. Se avisó a los alumnos.");
+        await subir(null, d.descdoc); await recargarTareas(); repintarTareas(); toast("Documento de información publicado. Se avisó a los alumnos.");
       } else {
         let grs = null;
         if (d.destino === "grados") { grs = [...f.querySelectorAll("input[name=grado]:checked")].map(x => Number(x.value)); if (!grs.length) falla("Marca al menos un grado, o elige «A todo el curso»."); }

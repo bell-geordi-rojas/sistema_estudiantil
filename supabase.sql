@@ -2057,7 +2057,8 @@ begin
 end $$;
 
 -- Sube un archivo. p_tipo 'material' (docente, a una tarea o suelto en el curso) o 'entrega' (alumno, a una tarea; reemplaza la entrega anterior)
-create or replace function subir_archivo(p_curso bigint, p_tarea bigint, p_tipo text, p_nombre text, p_mime text, p_contenido text) returns bigint
+drop function if exists subir_archivo(bigint, bigint, text, text, text, text);
+create or replace function subir_archivo(p_curso bigint, p_tarea bigint, p_tipo text, p_nombre text, p_mime text, p_contenido text, p_descripcion text default null) returns bigint
 language plpgsql security definer set search_path = public as $$
 declare v_inst bigint; t tareas; v_est bigint; v_id bigint; v_doc uuid; v_ext text;
 begin
@@ -2077,8 +2078,9 @@ begin
     if mi_rol() <> 'docente' or not _tarea_visible(p_curso, auth.uid()) then raise exception 'Solo los docentes suben material.'; end if;
     if v_ext is null or v_ext not in ('pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt') then raise exception 'Solo se aceptan PDF, Word, PowerPoint, Excel o texto.'; end if;
     v_doc := coalesce(t.docente_id, auth.uid());
-    insert into tarea_archivos (institucion_id, curso_id, tarea_id, tipo, docente_id, subido_por, nombre, mime, tam, contenido)
-      values (v_inst, p_curso, p_tarea, 'material', v_doc, auth.uid(), left(p_nombre, 200), left(coalesce(p_mime, ''), 100), (length(p_contenido) * 3) / 4, p_contenido) returning id into v_id;
+    insert into tarea_archivos (institucion_id, curso_id, tarea_id, tipo, docente_id, subido_por, nombre, mime, tam, contenido, descripcion)
+      values (v_inst, p_curso, p_tarea, 'material', v_doc, auth.uid(), left(p_nombre, 200), left(coalesce(p_mime, ''), 100), (length(p_contenido) * 3) / 4, p_contenido,
+              left(nullif(trim(coalesce(p_descripcion, '')), ''), 300)) returning id into v_id;
     if p_tarea is null then
       perform _notificar_curso(p_curso, 'subió material de apoyo «' || left(p_nombre, 80) || '» en «' || (select nombre from cursos where id = p_curso) || '».');
     end if;
@@ -2231,6 +2233,7 @@ alter table tareas add column if not exists peso smallint not null default 1 che
 alter table tareas add column if not exists cero_auto boolean not null default true;
 alter table tareas add column if not exists cerrada boolean not null default false;
 alter table notas add column if not exists tarea_id bigint references tareas (id) on delete set null;
+alter table tarea_archivos add column if not exists descripcion text check (length(descripcion) <= 300);   -- descripcion corta de un documento de informacion
 create index if not exists tareas_vencen on tareas (limite) where not cerrada and limite is not null;
 create index if not exists notas_tarea on notas (tarea_id) where tarea_id is not null;
 update tareas set cerrada = true, cero_auto = false where periodo_id is null and not cerrada;
