@@ -1839,6 +1839,12 @@ function proceso(titulo, pasos, mensaje) {
     error(msg) { fin("error", msg, 8000); },
   };
 }
+/* ===== Desplegables: al abrir uno se cierra el que estaba abierto en el mismo grupo (avisos legales, periodos de un curso, docentes, directorio…) ===== */
+document.addEventListener("click", ev => {
+  const s = ev.target.closest("details.acc > summary"); if (!s) return;
+  const d = s.parentElement; if (d.open) return;   // si ya estaba abierto, el clic lo cierra y no hay nada más que hacer
+  [...d.parentElement.children].forEach(x => { if (x !== d && x.matches && x.matches("details.acc") && x.open) x.open = false; });
+}, true);
 /* ===== Avisos legales: el círculo «?» aparece cuando la persona acepta el aviso de cookies ===== */
 const LEGAL = [
   ["Términos de uso", `<p>SINEVA es un sistema de gestión académica para instituciones educativas. Al usarlo aceptas estas condiciones:</p><ul><li>Tu cuenta es personal e intransferible. No compartas tu contraseña.</li><li>Debes usar el sistema solo para fines educativos y lícitos, sin intentar acceder a datos que no te corresponden.</li><li>Cada institución es responsable de la información que registra (alumnos, notas, tareas y anuncios).</li><li>El servicio se ofrece sin garantía de disponibilidad continua: puede haber mantenimiento o interrupciones.</li><li>Las cuentas que incumplan estas condiciones o pongan en riesgo a otras personas pueden ser suspendidas.</li></ul>`],
@@ -2019,8 +2025,8 @@ function repintarTareas() {
   if (vista === "tareas" && $("#main")) $("#main").innerHTML = vTareas();
 }
 const acciones = {
-  menu() { $("#menuPop").classList.toggle("open"); },
-  "curso-menu"(d) { const m = $(`#cm${d.id}`); const abrir = !m.classList.contains("open"); document.querySelectorAll(".cmenu.open").forEach(x => x.classList.remove("open")); if (abrir) m.classList.add("open"); },
+  menu() { document.querySelectorAll(".cmenu.open").forEach(x => x.classList.remove("open")); $("#menuPop").classList.toggle("open"); },
+  "curso-menu"(d) { const mp = $("#menuPop"); if (mp) mp.classList.remove("open"); const m = $(`#cm${d.id}`); const abrir = !m.classList.contains("open"); document.querySelectorAll(".cmenu.open").forEach(x => x.classList.remove("open")); if (abrir) m.classList.add("open"); },
   "curso-fav"(d) { const id = idNum(d), f = new Set(favoritos()); f.has(id) ? f.delete(id) : f.add(id); guardarLocal("fav_" + yo.id, JSON.stringify([...f])); render(); },
   async campana() {
     const l = notifs.slice(), nuevas = sinLeer();
