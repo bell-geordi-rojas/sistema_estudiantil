@@ -194,6 +194,33 @@ html.vt-pagina main{view-transition-name:contenido}
 .legal ul{padding-left:20px}
 #avisoCookies{position:fixed;left:16px;right:16px;bottom:16px;max-width:620px;margin:0 auto;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;gap:14px;align-items:center;z-index:60;box-shadow:0 8px 28px rgba(0,0,0,.3)}
 #avisoCookies p{margin:0;font-size:13px;flex:1}
+#centroProcesos{position:fixed;right:16px;bottom:16px;width:min(380px,calc(100vw - 32px));background:var(--card);color:var(--ink);border:1px solid var(--line);border-top:3px solid var(--teal);border-radius:16px;box-shadow:var(--shadow-lg);padding:14px 16px;z-index:80;animation:pcIn .3s ease}
+@keyframes pcIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+#centroProcesos.pc-error{border-top-color:var(--red)}#centroProcesos.pc-ok{border-top-color:var(--green)}
+#centroProcesos .pc-cab{display:flex;align-items:center;gap:12px}
+#centroProcesos .pc-ic{width:38px;height:38px;border-radius:10px;background:var(--teal);color:#fff;display:grid;place-items:center;font-weight:800;flex:none}
+#centroProcesos .pc-cab small{display:block;color:var(--mute);font-size:10px;letter-spacing:.8px;font-weight:600}
+#centroProcesos .pc-tit{font-size:15px}
+#centroProcesos .pc-cab>div{flex:1;min-width:0}
+#centroProcesos .pc-pct{font-weight:700;font-size:18px;color:var(--teal)}
+#centroProcesos.pc-error .pc-pct{color:var(--red)}#centroProcesos.pc-ok .pc-pct{color:var(--green)}
+#centroProcesos .pc-barra{height:8px;border-radius:99px;background:var(--line);overflow:hidden;margin:12px 0 8px}
+#centroProcesos .pc-barra i{display:block;height:100%;width:0;background:var(--teal);border-radius:99px;transition:width .2s linear}
+#centroProcesos.pc-error .pc-barra i{background:var(--red)}#centroProcesos.pc-ok .pc-barra i{background:var(--green)}
+#centroProcesos .pc-fila,#centroProcesos .pc-pie{display:flex;justify-content:space-between;gap:10px;font-size:12px}
+#centroProcesos .pc-fila b{font-size:13px}
+#centroProcesos .pc-pie{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);color:var(--mute)}
+#centroProcesos .pc-punto{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--teal);margin-right:6px}
+#centroProcesos.pc-error .pc-punto{background:var(--red)}#centroProcesos.pc-ok .pc-punto{background:var(--green)}
+#centroProcesos .pc-x{border:0;background:none;color:var(--mute);cursor:pointer;font-size:16px;padding:0 2px}
+.medidor{margin:-2px 0 12px;font-size:12px}
+.medidor .mbarra{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:6px}
+.medidor .mbarra i{height:6px;border-radius:99px;background:var(--line);transition:background .2s}
+.medidor .mbarra i.n1{background:var(--red)}.medidor .mbarra i.n2{background:#f59e0b}.medidor .mbarra i.n3{background:#84cc16}.medidor .mbarra i.n4{background:var(--green)}
+.medidor .mtxt{display:flex;justify-content:space-between;gap:8px;color:var(--mute)}.medidor .mtxt span{font-weight:700;color:var(--ink)}
+.medidor .mreglas{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:2px;color:var(--mute)}
+.medidor .mreglas li::before{content:"○ ";opacity:.7}.medidor .mreglas li.si{color:var(--green)}.medidor .mreglas li.si::before{content:"✔ ";opacity:1}
+.medidor [data-coincide].si{color:var(--green)}.medidor [data-coincide].mal{color:var(--red)}
 #btnLegal{position:fixed;left:16px;bottom:16px;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--ink);font-weight:700;font-size:18px;line-height:1;font-family:inherit;cursor:pointer;z-index:55;display:grid;place-items:center;padding:0;box-shadow:0 2px 10px rgba(0,0,0,.18);animation:legalIn .35s ease}
 #btnLegal:hover{background:var(--hover)}
 @keyframes legalIn{from{opacity:0;transform:scale(.6)}to{opacity:1;transform:none}}
@@ -1328,7 +1355,7 @@ function vCuenta() {
     <div class="err"></div><div><button class="btn">Guardar nombre</button></div></form></div>
     <div class="card"><h2>Apariencia</h2><p style="margin-top:0;color:var(--mute)">Efectos visuales: fundido entre pantallas, ventanas que crecen desde su tarjeta, desenfoque y zoom al pasar el cursor. Si te molestan o el equipo va lento, apágalos.</p>
     <button class="btn ${efectosActivos() ? "sec" : ""}" data-a="efectos">${efectosActivos() ? "Desactivar efectos visuales" : "Activar efectos visuales"}</button></div>
-    <div class="card"><h2>Cambiar contraseña</h2><form class="form" id="fPass"><label>Nueva contraseña (mín. 8, con letras y números)<input type="password" name="a" minlength="8" required autocomplete="new-password"></label>
+    <div class="card"><h2>Cambiar contraseña</h2><form class="form" id="fPass"><label>Nueva contraseña (mín. 8, con letras y números)<input type="password" name="a" minlength="8" required autocomplete="new-password"></label>${medidorHTML()}
     <label>Repite la contraseña<input type="password" name="b" minlength="8" required autocomplete="new-password"></label>
     <div class="err"></div><div><button class="btn">Cambiar contraseña</button></div></form></div>`;
 }
@@ -1367,7 +1394,7 @@ function pantallaLogin() {
     <label>Contraseña<input type="password" name="clave" required autocomplete="current-password"></label><div class="err" id="err"></div><button class="btn">Ingresar</button></form>`;
   else if (tabLogin === "activar") cuerpo = `<form class="form" id="fActivar" style="max-width:none"><p style="margin:0;color:var(--mute)">Usa el usuario y el código que te entregó tu institución y crea tu contraseña.</p>
     <label>Usuario o correo institucional<input name="usuario" required autocapitalize="none" autocomplete="username"></label><label>Código de activación<input name="codigo" required autocapitalize="characters" autocomplete="off"></label>
-    <label>Crea tu contraseña (mín. 8, con letras y números)<input type="password" name="a" minlength="8" required autocomplete="new-password"></label>
+    <label>Crea tu contraseña (mín. 8, con letras y números)<input type="password" name="a" minlength="8" required autocomplete="new-password"></label>${medidorHTML()}
     <label>Repite la contraseña<input type="password" name="b" minlength="8" required autocomplete="new-password"></label><div class="err" id="err"></div><button class="btn">Activar mi cuenta</button></form>`;
   else if (tabLogin === "descargar") cuerpo = descargasHTML();
   else cuerpo = `<form class="form" id="fAfil" style="max-width:none"><p style="margin:0;color:var(--mute)">Busca tu institución y deja tus nombres. Cuando te aprueben recibirás un usuario y un código para activar tu cuenta.</p>
@@ -1753,6 +1780,51 @@ let cargaLista = false;
     if (fin) { clearInterval(id); setTimeout(() => { el.classList.add("fin"); setTimeout(() => el.remove(), 500); }, 250); }
   }, 60);
 })();
+/* ===== Nivel de seguridad de una contraseña ===== */
+function evaluarClave(c, usuario = "") {
+  const l = c.length, may = /[A-ZÁÉÍÓÚÑ]/.test(c), min = /[a-záéíóúñ]/.test(c), num = /[0-9]/.test(c), sim = /[^A-Za-z0-9áéíóúñÁÉÍÓÚÑ]/.test(c);
+  const u = String(usuario || "").split("@")[0].toLowerCase();
+  const comun = l > 0 && (/^(12345678|123456789|1234567890|password|contrase[ñn]a|qwerty|abc12345|11111111|00000000|sineva|admin123|iloveyou)/i.test(c) || /^(.)\1+$/.test(c) || (l < 12 && /(0123|1234|2345|3456|4567|5678|6789|abcd|qwer)/i.test(c)));
+  const conUsuario = u.length >= 3 && c.toLowerCase().includes(u);
+  const cumple = l >= 8 && num && /[A-Za-z]/.test(c), debil = comun || conUsuario;
+  let pts = (l >= 8) + (l >= 12) + (l >= 16) + (may && min) + num + sim;
+  const nivel = !l ? 0 : !cumple || debil ? 1 : pts <= 3 ? 2 : pts === 4 ? 3 : 4;
+  const etiqueta = !l ? "—" : !cumple ? "Muy débil" : debil ? "Débil (muy común o parecida a tu usuario)" : ["", "Muy débil", "Media", "Fuerte", "Muy fuerte"][nivel];
+  const reglas = [[l >= 8, "8 caracteres o más"], [cumple, "Letras y números"], [may && min, "Mayúsculas y minúsculas"], [sim, "Un símbolo (! @ # $ …)"], [l > 0 && !debil, "No es común ni parecida a tu usuario"]];
+  return { nivel, etiqueta, reglas, cumple, debil };
+}
+const medidorHTML = () => `<div class="medidor" data-medidor aria-live="polite"><div class="mbarra"><i></i><i></i><i></i><i></i></div><div class="mtxt"><span>Nivel de seguridad</span><span data-nivel>—</span></div>
+  <ul class="mreglas">${evaluarClave("").reglas.map(([, t]) => `<li>${t}</li>`).join("")}</ul><small data-coincide></small></div>`;
+function actualizarMedidor(fm) {
+  const m = fm.querySelector("[data-medidor]"); if (!m) return;
+  const ev = evaluarClave(fm.a.value, fm.usuario ? fm.usuario.value : (yo ? yo.usuario : ""));
+  m.querySelectorAll(".mbarra i").forEach((x, i) => { x.className = i < ev.nivel ? "n" + ev.nivel : ""; });
+  m.querySelector("[data-nivel]").textContent = ev.etiqueta;
+  m.querySelector(".mreglas").innerHTML = ev.reglas.map(([ok, txt]) => `<li class="${ok ? "si" : ""}">${txt}</li>`).join("");
+  const co = m.querySelector("[data-coincide]"), b = fm.b ? fm.b.value : "";
+  co.textContent = !b ? "" : fm.a.value === b ? "✔ Las contraseñas coinciden" : "✖ Las contraseñas no coinciden"; co.className = !b ? "" : fm.a.value === b ? "si" : "mal";
+}
+/* ===== Centro de procesos: una tarjeta que muestra el avance de una validación (acceso, activación, cambio de contraseña) ===== */
+let procIntervalo = null, procCierre = null;
+function cerrarProceso() { clearInterval(procIntervalo); clearTimeout(procCierre); const e = document.getElementById("centroProcesos"); if (e) e.remove(); }
+function proceso(titulo, mensaje) {
+  cerrarProceso();
+  const el = document.createElement("div"); el.id = "centroProcesos"; el.setAttribute("role", "status"); el.setAttribute("aria-live", "polite");
+  el.innerHTML = `<div class="pc-cab"><span class="pc-ic">S</span><div><small>SINEVA · CENTRO DE PROCESOS</small><b class="pc-tit"></b></div><span class="pc-pct">0%</span><button type="button" class="pc-x" data-a="proceso-cerrar" aria-label="Cerrar">✕</button></div>
+    <div class="pc-barra"><i></i></div><div class="pc-fila"><b class="pc-msg"></b><span class="pc-tiempo">00:00</span></div>
+    <div class="pc-pie"><span><i class="pc-punto"></i><span class="pc-det"></span></span><span class="pc-n">1 proceso activo</span></div>`;
+  document.body.appendChild(el);
+  const q = s => el.querySelector(s), t0 = Date.now(); let pct = 0;
+  const pintar = () => { q(".pc-pct").textContent = Math.round(pct) + "%"; q(".pc-barra i").style.width = pct + "%"; };
+  q(".pc-tit").textContent = titulo; q(".pc-msg").textContent = mensaje || "Verificando…"; q(".pc-det").textContent = "En curso…";
+  procIntervalo = setInterval(() => { pct += (90 - pct) * 0.07; const s = Math.floor((Date.now() - t0) / 1000); q(".pc-tiempo").textContent = String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0"); pintar(); }, 120);
+  const fin = (clase, msg, det, ms) => { clearInterval(procIntervalo); el.className = "pc-" + clase; pct = clase === "ok" ? 100 : Math.max(pct, 90); q(".pc-msg").textContent = msg; q(".pc-det").textContent = det; q(".pc-n").textContent = clase === "ok" ? "Completado" : "Proceso detenido"; pintar(); procCierre = setTimeout(cerrarProceso, ms); };
+  return {
+    paso(msg, minimo) { if (minimo) pct = Math.max(pct, minimo); q(".pc-msg").textContent = msg; pintar(); },
+    ok(det) { fin("ok", "Completado", det, 3200); },
+    error(det) { fin("error", "No se pudo completar", det, 8000); },
+  };
+}
 /* ===== Avisos legales: el círculo «?» aparece cuando la persona acepta el aviso de cookies ===== */
 const LEGAL = [
   ["Términos de uso", `<p>SINEVA es un sistema de gestión académica para instituciones educativas. Al usarlo aceptas estas condiciones:</p><ul><li>Tu cuenta es personal e intransferible. No compartas tu contraseña.</li><li>Debes usar el sistema solo para fines educativos y lícitos, sin intentar acceder a datos que no te corresponden.</li><li>Cada institución es responsable de la información que registra (alumnos, notas, tareas y anuncios).</li><li>El servicio se ofrece sin garantía de disponibilidad continua: puede haber mantenimiento o interrupciones.</li><li>Las cuentas que incumplan estas condiciones o pongan en riesgo a otras personas pueden ser suspendidas.</li></ul>`],
@@ -1974,6 +2046,7 @@ const acciones = {
   },
   async "gra-doc-todos"(d) { try { await rpc("asignar_docente_grado", { p_docente: d.d, p_grado: Number(d.g), p_asignar: d.on === "1" }); await refrescarGrados(); toast(d.on === "1" ? "Cursos asignados al docente." : "Cursos quitados al docente."); } catch (e) { toast(e.message); } },
   async "anuncio-del"(d) { if (!confirm("¿Quitar este anuncio?")) return; try { await rpc("eliminar_anuncio", { p_id: idNum(d) }); await recargarExtra(); render(); toast("Anuncio quitado."); } catch (e) { toast(e.message); } },
+  "proceso-cerrar"() { cerrarProceso(); },
   "aviso-ok"() { guardarLocal("aviso_ok", "1"); const e = $("#avisoCookies"); if (e) e.remove(); montarLegal(); },
   legal() { abrirDlg(htmlLegal()); },
   "tarea-abrir"(d) { abrirDlg(htmlTarea(idNum(d))); },
@@ -2174,7 +2247,10 @@ const acciones = {
   async clave(d) {
     const p = perfilDe(d.id), n = await pedir(`Nueva contraseña para ${nombreCompleto(p)} (mín. 8 caracteres, con letras y números):`); if (n === null) return;
     if (!claveValida(n)) { toast("La contraseña debe tener al menos 8 caracteres, con letras y números."); return; }
-    await rpc("restablecer_contrasena", { p_perfil: p.id, p_nueva: n }); toast("Contraseña actualizada. Avísale a la persona.");
+    const ev = evaluarClave(n, p.usuario); if (ev.debil) { toast("Esa contraseña es muy común o se parece al usuario. Elige otra."); return; }
+    const pr = proceso("Restableciendo contraseña", "Aplicando el cambio");
+    try { await rpc("restablecer_contrasena", { p_perfil: p.id, p_nueva: n }); pr.ok("Seguridad de la nueva contraseña: " + ev.etiqueta); } catch (e) { pr.error(e.message); throw e; }
+    toast("Contraseña actualizada. Avísale a la persona.");
   },
   async rol(d) {
     const p = perfilDe(d.id), nuevo = p.rol === "admin" ? "docente" : "admin";
@@ -2258,7 +2334,8 @@ document.addEventListener("keydown", ev => {
 let tBusqueda, tFiltro;
 document.addEventListener("input", ev => {
   const t = ev.target;
-  if (t.id === "inscFiltro") { insc.filtro = t.value; clearTimeout(tFiltro); tFiltro = setTimeout(() => { const c = $("#inscTabla"); if (c) c.innerHTML = tablaInscCurso(); }, 120); }
+  if ((t.name === "a" || t.name === "b" || t.name === "usuario") && t.closest("#fActivar, #fPass")) actualizarMedidor(t.closest("form"));
+  else if (t.id === "inscFiltro") { insc.filtro = t.value; clearTimeout(tFiltro); tFiltro = setTimeout(() => { const c = $("#inscTabla"); if (c) c.innerHTML = tablaInscCurso(); }, 120); }
   else if (t.id === "calCodigo") { const e = calEstudiante(); if ((e ? e.id : null) !== calEstId) repintarCal(); }
   else if (t.id === "flt") {
     filtro = t.value; clearTimeout(tFiltro);
@@ -2369,11 +2446,16 @@ document.addEventListener("submit", ev => {
       await rpc("subir_archivo", { p_curso: Number(f.dataset.c), p_tarea: f.dataset.t ? Number(f.dataset.t) : null, p_tipo: f.dataset.tipo, p_nombre: file.name, p_mime: file.type || "", p_contenido: await leerBase64(file) });
       await recargarTareas(); repintarTareas(); toast(f.dataset.tipo === "entrega" ? "Tarea entregada." : "Documento subido.");
     } else if (f.id === "fLogin") {
-      await iniciarSesion(d.usuario, d.clave); await entrar(); conTransicion(render); rpc("registrar_acceso").catch(() => {});
+      const p = proceso("Validando acceso seguro", "Verificando credenciales");
+      try { await iniciarSesion(d.usuario, d.clave); p.paso("Cargando tu espacio…", 55); await entrar(); p.ok("Acceso verificado"); } catch (e) { p.error(e.message); throw e; }
+      conTransicion(render); rpc("registrar_acceso").catch(() => {});
     } else if (f.id === "fActivar") {
       if (d.a !== d.b) falla("Las contraseñas no coinciden.");
       if (!claveValida(d.a)) falla("La contraseña debe tener al menos 8 caracteres, con letras y números.");
-      await activarCuenta(d.usuario, d.codigo.trim(), d.a); await entrar(); render(); toast("¡Cuenta activada! Bienvenido.");
+      const ev = evaluarClave(d.a, d.usuario); if (ev.debil) falla("Esa contraseña es muy común o se parece a tu usuario. Elige otra más segura.");
+      const p = proceso("Activando tu cuenta", "Verificando tu código");
+      try { await activarCuenta(d.usuario, d.codigo.trim(), d.a); p.paso("Cargando tu espacio…", 60); await entrar(); p.ok("Seguridad de tu contraseña: " + ev.etiqueta); } catch (e) { p.error(e.message); throw e; }
+      render(); toast("¡Cuenta activada! Bienvenido.");
     } else if (f.id === "fAfil") {
       if (!instSel) falla("Busca y elige tu institución de la lista.");
       await rpc("solicitar_afiliacion", { p_institucion: instSel.id, p_nombres: d.nombres, p_apellidos: d.apellidos, p_rol: d.rol });
@@ -2451,7 +2533,10 @@ document.addEventListener("submit", ev => {
     } else if (f.id === "fPass") {
       if (d.a !== d.b) falla("Las contraseñas no coinciden.");
       if (!claveValida(d.a)) falla("La contraseña debe tener al menos 8 caracteres, con letras y números.");
-      await http("/auth/v1/user", { method: "PUT", body: { password: d.a } }); f.reset(); toast("Contraseña cambiada.");
+      const ev = evaluarClave(d.a, yo ? yo.usuario : ""); if (ev.debil) falla("Esa contraseña es muy común o se parece a tu usuario. Elige otra más segura.");
+      const p = proceso("Actualizando tu contraseña", "Aplicando el cambio");
+      try { await http("/auth/v1/user", { method: "PUT", body: { password: d.a } }); p.ok("Seguridad de tu contraseña: " + ev.etiqueta); } catch (e) { p.error(e.message); throw e; }
+      f.reset(); actualizarMedidor(f); toast("Contraseña cambiada.");
     }
   });
 });
