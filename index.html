@@ -272,57 +272,29 @@ html.vt-pagina main{view-transition-name:contenido}
 .menupop .badge{margin-left:auto;background:var(--red);color:#fff;border-radius:10px;padding:0 7px;font-size:11px;font-weight:700}
 @media(max-width:900px){html,body{overflow-x:hidden}.layout{grid-template-columns:minmax(0,1fr)}.grid>*,.card,.kpis,.cgrid>*{min-width:0;max-width:100%}.scroll{-webkit-overflow-scrolling:touch}.scroll>table{min-width:520px}dialog .scroll>table{min-width:0}nav{display:none}.menuwrap{display:block}.hbtn .txt{display:none}header .user,header [data-a=salir]{order:2}header [data-a=salir]{margin-left:auto}.grid{grid-template-columns:minmax(0,1fr)}.datos,.row2{grid-template-columns:1fr}main{padding:16px}}
 
-/* ===== ESTILO "papel monocromo" (inspirado en Vercel): solo apariencia. Para volver al diseno anterior se borra todo este bloque. ===== */
-:root{
-  --teal:#171717; --teal-d:#000; --bg:#fafafa; --card:#fff; --ink:#171717; --mute:#666; --line:#ebebeb; --row:#f2f2f2;
-  --side:#fafafa; --hover:#f2f2f2; --violet-l:#ededed; --violet-ink:#171717; --nav-on:#171717; --input-bg:#fff; --input-bd:#e0e0e0;
-  --chip-on:#f2f2f2; --chip-bd:#d4d4d4; --focus:#d4d4d4; --btn-sec:#4d4d4d; --glow1:transparent; --glow2:transparent;
-  --shadow:0 0 0 1px rgba(0,0,0,.08); --shadow-lg:0 0 0 1px rgba(0,0,0,.08),0 12px 40px rgba(0,0,0,.10);
-  --f-mono:"Geist Mono",ui-monospace,SFMono-Regular,Consolas,Menlo,monospace;
-}
-:root[data-theme=dark]{
-  --teal:#ededed; --teal-d:#fff; --bg:#0a0a0a; --card:#111; --ink:#ededed; --mute:#a1a1a1; --line:#262626; --row:#1c1c1c;
-  --side:#0a0a0a; --hover:#1a1a1a; --violet-l:#1f1f1f; --violet-ink:#ededed; --nav-on:#ededed; --input-bg:#0a0a0a; --input-bd:#2e2e2e;
-  --chip-on:#1f1f1f; --chip-bd:#3a3a3a; --focus:#444; --btn-sec:#d4d4d4; --glow1:transparent; --glow2:transparent;
-  --shadow:0 0 0 1px rgba(255,255,255,.10); --shadow-lg:0 0 0 1px rgba(255,255,255,.10),0 16px 48px rgba(0,0,0,.6);
-}
-body{font-family:"Geist","Inter","Segoe UI",system-ui,-apple-system,sans-serif;background:var(--bg);-webkit-font-smoothing:antialiased}
+/* ===== ESTILO de formas (inspirado en Vercel): esquinas de 6px, tipografia y detalles. Los colores y la sombra flotante son los originales. Para quitarlo se borra todo este bloque. ===== */
+:root{--f-mono:"Geist Mono",ui-monospace,SFMono-Regular,Consolas,Menlo,monospace}
+body{font-family:"Geist","Inter","Segoe UI",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
 h1,h2,h3,.card h2{font-weight:500;letter-spacing:-.02em}
-header{background:var(--bg);color:var(--ink);box-shadow:0 1px 0 var(--line)}
 .logo{font-weight:600;letter-spacing:-.02em}
-.logo i{background:var(--ink);border-radius:2px;clip-path:polygon(50% 8%,96% 92%,4% 92%)}
+.logo i{border-radius:2px;clip-path:polygon(50% 8%,96% 92%,4% 92%)}
 .logo i::after{display:none}
-.logo.clic:hover,.logo.clic:focus-visible,.user.clic:hover,.user.clic:focus-visible{background:var(--hover)}
-.hbtn{background:transparent;color:var(--ink);border-radius:6px;box-shadow:0 0 0 1px var(--line)}
-.hbtn:hover{background:var(--hover)}
-.user small{opacity:1;color:var(--mute)}
-nav{border-right:1px solid var(--line)}
+.hbtn{border-radius:6px}
 nav button{border-radius:6px}
-nav button.on{font-weight:500;box-shadow:0 0 0 1px var(--line);background:var(--card)}
 nav .badge{border-radius:9999px}
 .card{border-radius:6px;padding:16px}
 .chip{border-radius:6px}
-th{font-family:var(--f-mono);font-size:11px;font-weight:400;text-transform:uppercase;letter-spacing:.07em;color:var(--mute)}
+th{font-family:var(--f-mono);font-size:11px;font-weight:400;text-transform:uppercase;letter-spacing:.07em}
 .pill{border-radius:6px}
-.btn{border-radius:6px;font-weight:500;color:#fff}
-:root[data-theme=dark] .btn{color:#0a0a0a}
-:root[data-theme=dark] .btn.sec{color:var(--btn-sec)}
-:root[data-theme=dark] .btn.del{color:var(--red)}
+.btn{border-radius:6px;font-weight:500}
+.btn.del{border-radius:6px}
+input,select,textarea{border-radius:6px}
+.tabs{border-radius:6px}
+.tabs button{border-radius:4px;font-weight:500}
+.fotoGrande{border-radius:6px}
 .login .card{border-radius:10px}
 .kpi,.ccard{border-radius:6px}
-.menupop,.cmenu,dialog{border-radius:8px}
-.btn.sec{background:var(--card);color:var(--btn-sec);box-shadow:0 0 0 1px var(--line);border:0}
-.btn.del{border-radius:6px}
-input,select,textarea{border-radius:6px;border-color:var(--input-bd)}
-input:focus,select:focus,textarea:focus{outline:2px solid var(--focus);outline-offset:0;border-color:var(--ink)}
-.tabs{background:var(--hover);border-radius:6px}
-.tabs button{border-radius:4px;font-weight:500}
-.tabs button.on{box-shadow:0 0 0 1px var(--line)}
-.fotoGrande{border-radius:6px}
-@supports (backdrop-filter:blur(1px)) and (background:color-mix(in srgb,red,blue)){
-  header{background:color-mix(in srgb,var(--bg) 82%,transparent)}
-}
-</style>
+.menupop,.cmenu,dialog{border-radius:8px}</style>
 </head>
 <body>
 <div id="carga" role="status" aria-live="polite"><div class="ccaja"><img src="logo.png" alt="" width="64" height="64" style="border-radius:14px"><b>SINEVA</b>
