@@ -270,7 +270,7 @@ html.vt-pagina main{view-transition-name:contenido}
 .menupop button.on{background:var(--violet-l);color:var(--nav-on);font-weight:600}
 .menupop .sep{border:0;border-top:1px solid var(--line);margin:6px 0}
 .menupop .badge{margin-left:auto;background:var(--red);color:#fff;border-radius:10px;padding:0 7px;font-size:11px;font-weight:700}
-@media(max-width:900px){.layout{grid-template-columns:1fr}nav{display:none}.menuwrap{display:block}.hbtn .txt{display:none}header .user,header [data-a=salir]{order:2}header [data-a=salir]{margin-left:auto}.grid{grid-template-columns:1fr}.datos,.row2{grid-template-columns:1fr}main{padding:16px}}
+@media(max-width:900px){html,body{overflow-x:hidden}.layout{grid-template-columns:minmax(0,1fr)}.grid>*,.card,.kpis,.cgrid>*{min-width:0;max-width:100%}.scroll{-webkit-overflow-scrolling:touch}.scroll>table{min-width:520px}dialog .scroll>table{min-width:0}nav{display:none}.menuwrap{display:block}.hbtn .txt{display:none}header .user,header [data-a=salir]{order:2}header [data-a=salir]{margin-left:auto}.grid{grid-template-columns:minmax(0,1fr)}.datos,.row2{grid-template-columns:1fr}main{padding:16px}}
 </style>
 </head>
 <body>
@@ -959,13 +959,13 @@ function tarjetaCursoVista(c, favs) {
   const sub = periodoSel ? periodoDe(periodoSel).nombre : `Todos los ${nomPeriodos(yo.institucion.tipo)}`, fav = favs.has(c.id);
   return `<div class="ccard" data-a="curso-ver" data-id="${c.id}"><div class="banw">${bannerCurso(c.id)}</div>
     <button class="cstar ${fav ? "on" : ""}" data-a="curso-fav" data-id="${c.id}" title="${fav ? "Quitar de favoritos" : "Marcar como favorito"}">${fav ? "★" : "☆"}</button>
-    <div class="cb"><div class="ct">${esc(c.nombre)}</div><div class="cs">${esc(sub)}</div>${etiquetaCurso(c) ? `<div class="ci">${esc(etiquetaCurso(c))}</div>` : ""}<div class="ci">${info}</div></div>
+    <div class="cb"><div class="ct">${esc(c.nombre)}</div>${esUni() && !periodoSel ? "" : `<div class="cs">${esc(sub)}</div>`}${etiquetaCurso(c) ? `<div class="ci">${esc(etiquetaCurso(c))}</div>` : ""}<div class="ci">${info}</div></div>
     <div class="cm"><button class="mini" data-a="curso-menu" data-id="${c.id}" title="Opciones" aria-label="Opciones del curso">⋮</button>
       <div class="cmenu" id="cm${c.id}"><button data-a="curso-ver" data-id="${c.id}">Notas y personas</button>${puedeCursos() ? `<button data-a="curso-ren" data-id="${c.id}">Renombrar</button><button data-a="curso-del" data-id="${c.id}">Quitar</button>` : ""}</div></div></div>`;
 }
 function vCursos() {
   const cs = miCursos(), favs = new Set(favoritos()), orden = [...cs].sort((a, b) => (favs.has(b.id) ? 1 : 0) - (favs.has(a.id) ? 1 : 0));
-  return `<div class="bar"><span class="chip on">${esc(yo.institucion.nombre)}</span>${selPeriodo()}</div>` +
+  return `<div class="bar"><span class="chip on">${esc(yo.institucion.nombre)}</span>${esUni() ? "" : selPeriodo()}</div>` +
     (cs.length ? `<div class="cgrid">${orden.map(c => tarjetaCursoVista(c, favs)).join("")}</div>`
       : `<div class="card"><div class="empty">Aún no hay cursos${puedeCursos() ? `. Agrégalos en «${tituloConfig()}».` : "."}</div></div>`);
 }
@@ -1722,33 +1722,43 @@ function vAnuncios() {
 /* ===== Directorio del dueño: todas las personas, por institución / carrera / ciclo / curso (universidad) o institución / grado (colegio) ===== */
 function vDirectorio() {
   if (!insts.length) return `<div class="card"><div class="empty">Aún no hay instituciones.</div></div>`;
-  const alum = es => es.length ? `<div class="chips">${es.map(e => `<span class="note">${esc(e.nombre)} <small>${esc(e.codigo)}</small></span>`).join("")}</div>` : `<small>Sin alumnos.</small>`;
   const det = (titulo, resumen, cuerpo, abierto) => `<details class="acc" ${abierto ? "open" : ""}><summary><span>${titulo}</span><small>${resumen}</small></summary><div class="cuerpo">${cuerpo}</div></details>`;
-  const h = t => `<div style="font-weight:600;margin:10px 0 4px">${t}</div>`;
-  return insts.map(i => {
-    const pe = est.filter(e => e.institucion_id === i.id), docs = docentesDe(i.id), adm = perfiles.filter(p => p.rol === "admin" && p.institucion_id === i.id);
-    let cuerpo = "";
-    if (i.tipo === "universidad") {
-      cuerpo = carrerasDe(i.id).map(c => {
-        const as = pe.filter(e => e.carrera_id === c.id);
-        const ciclos = [...Array(c.ciclos)].map((_, k) => k + 1).map(n => {
-          const a2 = as.filter(e => e.ciclo === n), cs = ordenCursos(cursos.filter(x => x.carrera_id === c.id && x.ciclo === n)); if (!a2.length && !cs.length) return "";
-          return det(`Ciclo ${n}`, `${cs.length} curso(s) · ${a2.length} alumno(s)`, (cs.length ? h("Cursos y docentes") + cs.map(x => `<div>${esc(x.nombre)} <small>${esc(nombresDocsCurso(x))}</small></div>`).join("") : "") + h("Alumnos") + alum(a2));
-        }).join("");
-        return det(esc(c.nombre), `${as.length} alumno(s) · ${c.ciclos} ciclos`, ciclos || `<small>Sin cursos ni alumnos todavía.</small>`);
-      }).join("");
-      const sin = pe.filter(e => !e.carrera_id); if (sin.length) cuerpo += det("Sin carrera", `${sin.length} alumno(s)`, alum(sin));
+  const tabla = (cab, filas) => filas.length ? `<div class="scroll"><table><thead><tr>${cab.map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>${filas.join("")}</tbody></table></div>` : `<small>Aún no hay datos.</small>`;
+  const sub = (a, b) => `<td>${esc(a)}<small style="display:block">${esc(b)}</small></td>`, vacio = "<small>—</small>";
+  const lista = a => a.length ? esc(a.join(", ")) : vacio, unicos = a => [...new Set(a.filter(Boolean))];
+  const cursosDeDoc = d => docCursos.filter(x => x.docente_id === d.id).map(x => cursoDe(x.curso_id)).filter(Boolean);
+  const items = insts.map(i => {
+    const uni = i.tipo === "universidad", sec = !uni && i.nivel === "secundaria";
+    const pe = est.filter(e => e.institucion_id === i.id).sort((a, b) => a.nombre.localeCompare(b.nombre)), docs = docentesDe(i.id), adm = perfiles.filter(p => p.rol === "admin" && p.institucion_id === i.id);
+    const cs = ordenCursos(cursos.filter(c => c.institucion_id === i.id)), gs = grados.filter(g => g.institucion_id === i.id).sort((a, b) => a.orden - b.orden), cars = carrerasDe(i.id);
+    const filaCurso = x => `<div>${esc(x.nombre)} <small>${esc(nombresDocsCurso(x))}</small></div>`;
+    let tEst, nEst, estructura;
+    if (uni) {
+      tEst = "Carreras y cursos"; nEst = `${cars.length} carrera(s) · ${cs.length} curso(s)`;
+      estructura = cars.map(c => {
+        const mios = cs.filter(x => x.carrera_id === c.id);
+        const ciclos = [...Array(c.ciclos)].map((_, k) => k + 1).map(n => { const l = mios.filter(x => x.ciclo === n); return l.length ? det(`Ciclo ${n}`, `${l.length} curso(s)`, l.map(filaCurso).join("")) : ""; }).join("") + (mios.some(x => !x.ciclo) ? det("Sin ciclo", "", mios.filter(x => !x.ciclo).map(filaCurso).join("")) : "");
+        return det(esc(c.nombre), `${c.ciclos} ciclos · ${mios.length} curso(s) · ${pe.filter(e => e.carrera_id === c.id).length} alumno(s)`, ciclos || `<small>Esta carrera aún no tiene cursos.</small>`);
+      }).join("") + (cs.some(x => !x.carrera_id) ? det("Cursos comunes", "", cs.filter(x => !x.carrera_id).map(filaCurso).join("")) : "");
+    } else if (sec) {
+      tEst = "Grados y cursos"; nEst = `${gs.length} grado(s) · ${cs.length} curso(s)`;
+      estructura = gs.map(g => { const l = cs.filter(x => x.grado_id === g.id); return det(esc(g.nombre), `${l.length} curso(s) · ${pe.filter(e => e.grado_id === g.id).length} alumno(s)`, l.length ? l.map(filaCurso).join("") : `<small>Sin cursos propios: lleva los de todos los grados.</small>`); }).join("")
+        + (cs.some(x => !x.grado_id) ? det("Cursos de todos los grados", `${cs.filter(x => !x.grado_id).length} curso(s)`, cs.filter(x => !x.grado_id).map(filaCurso).join("")) : "");
     } else {
-      cuerpo = grados.filter(g => g.institucion_id === i.id).map(g => {
-        const as = pe.filter(e => e.grado_id === g.id), dg = docentesDeGrado(g);
-        return det(esc(g.nombre), `${as.length} alumno(s) · ${dg.length} docente(s)`, h("Docentes") + (dg.length ? `<div class="chips">${dg.map(d => `<span class="tag">${esc(nombreCompleto(d))}</span>`).join("")}</div>` : `<small>Sin docente.</small>`) + h("Alumnos") + alum(as));
-      }).join("");
-      const sin = pe.filter(e => !e.grado_id); if (sin.length) cuerpo += det("Sin grado", `${sin.length} alumno(s)`, alum(sin));
+      tEst = "Grados"; nEst = `${gs.length} grado(s)`;
+      estructura = gs.map(g => { const t = tutorDe(g); return `<div>${esc(g.nombre)} <small>${t ? "Docente: " + esc(nombreCompleto(t)) : "Sin docente"} · ${pe.filter(e => e.grado_id === g.id).length} alumno(s)</small></div>`; }).join("");
     }
-    cuerpo += det("Docentes de la institución", `${docs.length}`, docs.length ? `<div class="chips">${docs.map(d => `<span class="tag">${esc(nombreCompleto(d))}</span>`).join("")}</div>` : `<small>Sin docentes.</small>`);
-    if (adm.length) cuerpo += det("Administradores", `${adm.length}`, `<div class="chips">${adm.map(d => `<span class="tag">${esc(nombreCompleto(d))}</span>`).join("")}</div>`);
-    return `<div class="card"><h2>${esc(i.nombre)} <small>${etiquetaTipo(i)} · ${pe.length} alumno(s) · ${docs.length} docente(s)</small></h2>${cuerpo}</div>`;
+    const alumnos = uni ? tabla(["Alumno", "Carrera", "Ciclo"], pe.map(e => `<tr>${sub(e.nombre, e.codigo)}<td>${carreraDe(e.carrera_id) ? esc(carreraDe(e.carrera_id).nombre) : "<small>Sin carrera</small>"}</td><td>${e.carrera_id ? "Ciclo " + e.ciclo : vacio}</td></tr>`))
+      : sec ? tabla(["Alumno", "Grado"], pe.map(e => `<tr>${sub(e.nombre, e.codigo)}<td>${gradoDe(e.grado_id) ? esc(gradoDe(e.grado_id).nombre) : "<small>Sin grado</small>"}</td></tr>`))
+      : tabla(["Alumno", "Grado", "Docente"], pe.map(e => `<tr>${sub(e.nombre, e.codigo)}<td>${gradoDe(e.grado_id) ? esc(gradoDe(e.grado_id).nombre) : "<small>Sin grado</small>"}</td><td>${perfilDe(e.docente_id) ? esc(nombreCompleto(perfilDe(e.docente_id))) : "<small>Sin docente</small>"}</td></tr>`));
+    const doc = uni ? tabla(["Docente", "Carreras", "Cursos"], docs.map(d => { const cd = cursosDeDoc(d); return `<tr>${sub(nombreCompleto(d), d.usuario)}<td>${lista(unicos(cd.map(x => (carreraDe(x.carrera_id) || {}).nombre)))}</td><td>${lista(cd.map(x => x.nombre))}</td></tr>`; }))
+      : sec ? tabla(["Docente", "Grados", "Cursos"], docs.map(d => { const cd = cursosDeDoc(d); return `<tr>${sub(nombreCompleto(d), d.usuario)}<td>${cd.some(x => !x.grado_id) ? "Todos" : lista(unicos(cd.map(x => (gradoDe(x.grado_id) || {}).nombre)))}</td><td>${lista(cd.map(x => x.nombre))}</td></tr>`; }))
+      : tabla(["Docente", "Grado a cargo", "Alumnos"], docs.map(d => `<tr>${sub(nombreCompleto(d), d.usuario)}<td>${lista(gs.filter(g => { const t = tutorDe(g); return t && t.id === d.id; }).map(g => g.nombre))}</td><td>${pe.filter(e => e.docente_id === d.id).length}</td></tr>`));
+    return `<details class="acc"><summary><span>${esc(i.nombre)}</span><small>${etiquetaTipo(i)} · ${pe.length} alumno(s) · ${docs.length} docente(s)</small></summary><div class="cuerpo">
+      ${adm.length ? `<p style="margin:0 0 10px;color:var(--mute);font-size:13px">Administrador(es): ${esc(adm.map(nombreCompleto).join(", "))}</p>` : ""}
+      ${det(tEst, nEst, estructura || `<small>Aún no hay datos.</small>`)}${det("Alumnos", `${pe.length}`, alumnos)}${det("Docentes", `${docs.length}`, doc)}</div></details>`;
   }).join("");
+  return `<div class="card"><h2>Instituciones <small>${insts.length}</small></h2><p style="margin-top:0;color:var(--mute)">Abre una institución para ver su estructura, sus alumnos y sus docentes.</p>${items}</div>`;
 }
 /* ===== Seguridad (dueño): actividad sospechosa y acciones delicadas ===== */
 const EVENTO_TXT = { login_fallido: "Inicio de sesión fallido", login_sospechoso: "Intentos de acceso sospechosos", login: "Inicio de sesión", activacion_fallida: "Código de activación incorrecto",
