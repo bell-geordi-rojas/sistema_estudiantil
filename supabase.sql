@@ -1995,6 +1995,22 @@ begin
   return _cerrar_vencidas();
 end $$;
 
+create or replace function ampliar_plazo(p_tarea bigint, p_limite timestamptz) returns void
+language plpgsql security definer set search_path = public as $$
+declare t tareas;
+begin
+  select * into t from tareas where id = p_tarea;
+  if not found then raise exception 'Tarea no encontrada.'; end if;
+  if mi_rol() is distinct from 'docente' or not _tarea_visible(t.curso_id, t.docente_id) then raise exception 'No autorizado: solo el docente de la tarea puede ampliar el plazo.'; end if;
+  if p_limite is null or p_limite <= now() then raise exception 'Elige una fecha limite futura.'; end if;
+  perform _limitar('plazo:' || auth.uid(), 30, 3600);
+  update tareas set limite = p_limite, cerrada = false where id = p_tarea;
+  -- quien recibio 0 automatico por no entregar tiene otra oportunidad: ese 0 se retira
+  delete from notas where tarea_id = p_tarea and nota = 0
+    and estudiante_id not in (select estudiante_id from tarea_archivos where tarea_id = p_tarea and tipo = 'entrega' and estudiante_id is not null);
+  perform _notificar_curso(t.curso_id, 'amplió el plazo de la tarea «' || t.titulo || '» hasta el ' || to_char(p_limite at time zone 'America/Lima', 'DD/MM/YYYY HH24:MI') || '.');
+end $$;
+
 create or replace function eliminar_tarea(p_id bigint) returns void
 language plpgsql security definer set search_path = public as $$
 declare t tareas;
@@ -2035,6 +2051,7 @@ begin
     if mi_rol() <> 'alumno' or p_tarea is null then raise exception 'No autorizado.'; end if;
     v_est := _mi_estudiante();
     if v_est is null or not _tarea_visible(p_curso, t.docente_id) then raise exception 'Esta tarea no es de tus cursos.'; end if;
+    if t.limite is not null and t.limite < now() then raise exception 'El plazo de esta tarea venció. Pide a tu docente que lo amplíe.'; end if;
     if v_ext is null or v_ext not in ('pdf', 'doc', 'docx') then raise exception 'Sube tu tarea en PDF o Word (.pdf, .doc, .docx).'; end if;
     delete from tarea_archivos where tarea_id = p_tarea and tipo = 'entrega' and estudiante_id = v_est;
     insert into tarea_archivos (institucion_id, curso_id, tarea_id, tipo, estudiante_id, docente_id, subido_por, nombre, mime, tam, contenido)
@@ -2053,6 +2070,9 @@ begin
   select * into a from tarea_archivos where id = p_id;
   if not found then raise exception 'Archivo no encontrado.'; end if;
   if not ((mi_rol() = 'admin' and a.institucion_id = mi_inst()) or a.subido_por = auth.uid()) then raise exception 'No autorizado.'; end if;
+  if a.tipo = 'entrega' and mi_rol() = 'alumno' and exists (select 1 from tareas where id = a.tarea_id and limite is not null and limite < now()) then
+    raise exception 'El plazo ya venció: no puedes retirar tu entrega.';
+  end if;
   delete from tarea_archivos where id = p_id;
 end $$;
 
@@ -2242,7 +2262,7 @@ begin
              'cambiar_rol', 'eliminar_cuenta', 'regenerar_codigo', 'eliminar_invitacion', 'registrar_estudiante', 'actualizar_estudiante', 'reasignar_docente',
              'eliminar_estudiante', 'agregar_nota', 'actualizar_nota', 'eliminar_nota',
              'cambiar_tipo_institucion', 'eliminar_institucion', 'crear_invitaciones_masivo', 'actualizar_dominio', 'configurar_correo_institucion', 'quitar_correo_institucion', 'probar_correo', 'actualizar_cuentas_google',
-             'activar_periodo', 'registrar_acceso', 'registrar_denegado', 'cerrar_tareas_vencidas', 'ultimos_accesos', 'marcar_notificaciones_leidas', 'crear_grado', 'eliminar_grado', 'asignar_grado_estudiante', 'asignar_docente_grado', 'asignar_grado_curso', 'crear_anuncio', 'eliminar_anuncio', 'crear_tarea', 'eliminar_tarea', 'subir_archivo', 'eliminar_archivo', 'crear_carrera', 'editar_carrera', 'eliminar_carrera', 'asignar_curso_docente', 'inscribir_estudiantes', 'inscribir_ciclo', 'cambiar_carrera_estudiante', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
+             'activar_periodo', 'registrar_acceso', 'registrar_denegado', 'cerrar_tareas_vencidas', 'ampliar_plazo', 'ultimos_accesos', 'marcar_notificaciones_leidas', 'crear_grado', 'eliminar_grado', 'asignar_grado_estudiante', 'asignar_docente_grado', 'asignar_grado_curso', 'crear_anuncio', 'eliminar_anuncio', 'crear_tarea', 'eliminar_tarea', 'subir_archivo', 'eliminar_archivo', 'crear_carrera', 'editar_carrera', 'eliminar_carrera', 'asignar_curso_docente', 'inscribir_estudiantes', 'inscribir_ciclo', 'cambiar_carrera_estudiante', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
              'crear_periodo', 'renombrar_periodo', 'eliminar_periodo', 'actualizar_mi_perfil', 'actualizar_mi_foto'])
   loop
     execute format('revoke all on function %s from public, anon', f);

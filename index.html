@@ -1596,8 +1596,8 @@ function htmlCurso(c, tab) {
   const sub = alumno && total.length ? `${esUni() ? "Promedio ponderado" : "Promedio"} del curso: ${fmt(mediaPond(total))}` : (alumno ? "Sin notas aún" : "Notas por " + nomPeriodo(yo.institucion.tipo).toLowerCase());
   const pestana = (k, n) => `<button class="${tab === k ? "on" : ""}" data-a="curso-tab" data-id="${k}" data-c="${c.id}">${n}</button>`;
   return `<div class="banw" style="margin:-18px -18px 14px;view-transition-name:banner-curso">${bannerCurso(c.id)}</div><div class="dhead"><div><b>${esc(c.nombre)}</b><small>${etiquetaCurso(c) ? esc(etiquetaCurso(c)) + " · " : ""}${esc(sub)}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>
-    <div class="tabs" style="max-width:440px;margin-bottom:12px">${pestana("notas", "Notas")}${pestana("tareas", "Tareas")}${pestana("personas", "Personas")}</div>
-    ${tab === "personas" ? personasCurso(c) : tab === "tareas" ? tareasTab(c) : (cursoSecciones(c) || `<div class="empty">Aún no hay ${nomPeriodos(yo.institucion.tipo)} configurados.</div>`)}`;
+    <div class="tabs" style="max-width:440px;margin-bottom:12px">${pestana("notas", "Notas")}${yo.rol !== "docente" ? pestana("tareas", "Tareas") : ""}${pestana("personas", "Personas")}</div>
+    ${tab === "personas" ? personasCurso(c) : tab === "tareas" && yo.rol !== "docente" ? tareasTab(c) : (cursoSecciones(c) || `<div class="empty">Aún no hay ${nomPeriodos(yo.institucion.tipo)} configurados.</div>`)}`;
 }
 /* ===== Grados (colegios): el administrador añade alumnos y docentes (y cursos, en secundaria) a cada grado ===== */
 const gradoDe = id => grados.find(g => g.id === id);
@@ -1810,7 +1810,7 @@ function estadoTarea(t) {
   return vencida(t) ? `<span class="chip" style="color:var(--red)">${t.cero_auto ? "Vencida · nota 0" : "Vencida"}</span>` : `<span class="chip">Pendiente</span>`;
 }
 const etiquetaTarea = `<span class="chip on" style="padding:1px 8px;font-size:11px;margin-right:6px">Tarea</span>`;
-const etiquetaApoyo = `<span class="chip" style="padding:1px 8px;font-size:11px;margin-right:6px">Apoyo</span>`;
+const etiquetaApoyo = `<span class="chip" style="padding:1px 8px;font-size:11px;margin-right:6px">Información</span>`;
 function filaTarea(t, conCurso) {
   const c = cursoDe(t.curso_id);
   return `<div class="card" style="margin:0 0 10px;padding:12px 14px;border-left:3px solid var(--teal);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
@@ -1822,31 +1822,38 @@ function formTarea(cursoFijo) {
   const cs = cursosQueDicto(); if (!cs.length && !cursoFijo) return "";
   const L = "display:grid;gap:4px;margin-bottom:10px;font-size:13px;color:var(--mute)", inst = (cursoFijo || cs[0]).institucion_id;
   const ps = periodosDe(inst), ACEPTA = ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt";
-  return `<form id="fTarea" class="card" style="margin:0 0 14px"><h2 style="margin-top:0">Nueva publicación</h2>
+  const opcion = (v, titulo, texto, marcado) => `<label style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:8px;cursor:pointer;color:var(--ink)"><input type="radio" name="tipo" value="${v}" ${marcado ? "checked" : ""} style="margin-top:3px"><span><b>${titulo}</b><small style="display:block">${texto}</small></span></label>`;
+  return `<form id="fTarea" class="card" style="margin:0 0 14px"><h2 style="margin-top:0">Nueva carpeta</h2>
     ${cursoFijo ? `<input type="hidden" name="curso" value="${cursoFijo.id}">` : `<label style="${L}">Curso<select name="curso" required>${cs.map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join("")}</select></label>`}
-    <label style="${L}">¿Qué vas a publicar?<select name="tipo" id="tipoPub"><option value="tarea">Tarea: los alumnos entregan su trabajo y reciben nota</option><option value="apoyo">Material de apoyo: solo información, no se entrega</option></select></label>
+    <div style="display:grid;gap:8px;margin-bottom:12px">${opcion("tarea", "Tarea", "Los alumnos entregan su trabajo y reciben nota.", true)}${opcion("info", "Documento de información", "Solo para leer o estudiar: no se entrega ni tiene nota.", false)}</div>
     <div data-solo="tarea"><label style="${L}">Título de la tarea<input name="titulo" maxlength="120" required placeholder="p. ej. Informe de la unidad 2"></label>
     <label style="${L}">Instrucciones (opcional)<textarea name="descripcion" rows="3" maxlength="2000"></textarea></label>
     <div class="row2"><label style="${L}">Fecha límite (opcional)<input type="datetime-local" name="limite"></label>
     <label style="${L}">La nota va en el periodo<select name="periodo"><option value="">Automático (el del curso)</option>${ps.map(p => `<option value="${p.id}">${esc(p.nombre)}</option>`).join("")}</select></label></div>
     ${esUni() ? `<label style="${L}">Peso de la nota<select name="peso">${PESOS.map(p => `<option value="${p}">Peso ${p}</option>`).join("")}</select></label>` : ""}
-    <label style="display:flex;gap:8px;align-items:center;margin-bottom:10px;font-size:13px"><input type="checkbox" name="cero" checked> Si no entregan a tiempo, poner nota 0 automáticamente (solo si pones fecha límite)</label></div>
+    <label style="display:flex;gap:8px;align-items:center;margin-bottom:10px;font-size:13px"><input type="checkbox" name="cero" checked> Si no entregan a tiempo, poner nota 0 automáticamente (solo si hay fecha límite)</label>
+    <p style="margin:0 0 10px;color:var(--mute);font-size:12px">Al vencer la fecha límite ya no se aceptan entregas, salvo que amplíes el plazo.</p></div>
     <label style="${L}">Archivo (<span id="pistaArchivo">opcional: se sube junto con la tarea</span>)<input type="file" name="archivo" accept="${ACEPTA}"></label>
-    <div class="err"></div><button class="btn">Crear tarea</button></form>`;
+    <div class="err"></div><button class="btn">Crear carpeta</button></form>`;
+}
+function formPlazo(t) {
+  return `<form id="fPlazo" data-t="${t.id}" class="bar" style="margin:8px 0 12px;align-items:flex-end">
+    <label style="display:grid;gap:4px;font-size:13px;color:var(--mute)">${vencida(t) ? "El plazo venció: los alumnos ya no pueden entregar. Nueva fecha límite" : "Ampliar o cambiar la fecha límite"}<input type="datetime-local" name="limite" required></label>
+    <button class="btn sm">${vencida(t) ? "Reabrir con nuevo plazo" : "Guardar plazo"}</button><div class="err" style="width:100%"></div></form>`;
 }
 function tareasTab(c) {
   const ts = tareasDeCurso(c), staff = yo.rol === "docente", sueltos = archivos.filter(a => a.tipo === "material" && a.curso_id === c.id && !a.tarea_id);
   const apoyo = sueltos.length ? `<div class="scroll"><table><tbody>${sueltos.map(a => `<tr><td>${etiquetaApoyo}${esc(a.nombre)}<small style="display:block;color:var(--mute)">${fmtTam(a.tam || 0)} · ${fechaHora(a.creado)}</small></td>
-    <td style="text-align:right;white-space:nowrap"><button class="btn sm sec" data-a="archivo-bajar" data-id="${a.id}">Descargar</button>${staff ? ` <button class="btn sm sec" data-a="archivo-borrar" data-id="${a.id}">✕</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Aún no hay material de apoyo.</div>`;
-  return `<div data-cursotab="${c.id}">${staff ? formTarea(c) : ""}
+    <td style="text-align:right;white-space:nowrap"><button class="btn sm sec" data-a="archivo-bajar" data-id="${a.id}">Descargar</button>${staff ? ` <button class="btn sm sec" data-a="archivo-borrar" data-id="${a.id}">✕</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Aún no hay documentos de información.</div>`;
+  return `<div data-cursotab="${c.id}">
     <h2 style="font-size:16px;margin:4px 0 2px">Tareas <small>${ts.length}</small></h2><p style="margin:0 0 8px;color:var(--mute);font-size:12px">Se entregan y tienen nota.</p>
     ${ts.length ? ts.map(t => filaTarea(t, false)).join("") : `<div class="empty">Aún no hay tareas en este curso.</div>`}
-    <div class="card" style="margin:14px 0 0;border-left:3px solid var(--mute)"><h2 style="margin-top:0">Material de apoyo <small>${sueltos.length}</small></h2><p style="margin:0 0 8px;color:var(--mute);font-size:12px">Información para estudiar: no se entrega ni tiene nota.</p>${apoyo}</div></div>`;
+    <div class="card" style="margin:14px 0 0;border-left:3px solid var(--mute)"><h2 style="margin-top:0">Documentos de información <small>${sueltos.length}</small></h2><p style="margin:0 0 8px;color:var(--mute);font-size:12px">Para leer o estudiar: no se entrega ni tiene nota.</p>${apoyo}</div></div>`;
 }
 function listaArchivos(lista, puedeBorrar) {
   if (!lista.length) return `<small style="color:var(--mute)">Sin documentos.</small>`;
   return `<div class="scroll"><table><tbody>${lista.map(a => `<tr><td>${esc(a.nombre)}<small style="display:block;color:var(--mute)">${fmtTam(a.tam || 0)} · ${fechaHora(a.creado)}</small></td>
-    <td style="text-align:right;white-space:nowrap"><button class="btn sm sec" data-a="archivo-bajar" data-id="${a.id}">Descargar</button>${puedeBorrar || (a.tipo === "entrega" && yo.rol === "alumno") ? ` <button class="btn sm sec" data-a="archivo-borrar" data-id="${a.id}">✕</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
+    <td style="text-align:right;white-space:nowrap"><button class="btn sm sec" data-a="archivo-bajar" data-id="${a.id}">Descargar</button>${puedeBorrar || (a.tipo === "entrega" && yo.rol === "alumno" && !vencida(tareas.find(x => x.id === a.tarea_id) || {})) ? ` <button class="btn sm sec" data-a="archivo-borrar" data-id="${a.id}">✕</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
 }
 function formSubida(cursoId, tareaId, tipo) {
   return `<form class="fSubida" data-c="${cursoId}" data-t="${tareaId || ""}" data-tipo="${tipo}" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -1863,8 +1870,8 @@ function htmlTarea(id) {
   if (alumno) {
     const venc = vencida(t) && !en;
     cuerpo = `<h3 style="font-size:15px">Mi entrega</h3>${en ? `<p class="msg">${estadoTarea(t)} Entregaste «${esc(en.nombre)}» el ${fechaHora(en.creado)}. Si subes otro archivo, reemplaza al anterior.</p>${listaArchivos([en], true)}`
-      : venc ? `<p class="msg warn">El plazo venció${t.cero_auto ? " y se registró nota 0" : ""}. Aún puedes subir tu trabajo para que tu docente lo revise.</p>` : `<p class="msg warn">Aún no has entregado esta tarea.</p>`}
-      ${formSubida(t.curso_id, t.id, "entrega")}<p style="color:var(--mute);font-size:12px">PDF o Word, máximo 4 MB.</p>`;
+      : venc ? `<p class="msg warn">El plazo venció${t.cero_auto ? " y se registró nota 0" : ""}. Ya no se aceptan entregas; si necesitas entregar, pide a tu docente que amplíe el plazo.</p>` : `<p class="msg warn">Aún no has entregado esta tarea.</p>`}
+      ${venc ? "" : `${formSubida(t.curso_id, t.id, "entrega")}<p style="color:var(--mute);font-size:12px">PDF o Word, máximo 4 MB.</p>`}`;
   } else {
     const alumnos = est.filter(e => porCursoInst(t.institucion_id || (c && c.institucion_id)) ? inscrito(e.id, t.curso_id) : e.docente_id === t.docente_id).sort((a, b) => a.nombre.localeCompare(b.nombre));
     cuerpo = `<h3 style="font-size:15px">Entregas (${alumnos.filter(e => entregaDe(t, e)).length} de ${alumnos.length})</h3><div class="scroll"><table><thead><tr><th>Alumno</th><th>Entrega</th><th></th></tr></thead><tbody>` +
@@ -1874,17 +1881,28 @@ function htmlTarea(id) {
   }
   return `<div data-tarea="${t.id}"><div class="dhead"><div><b>${esc(t.titulo)}</b><small>${c ? esc(c.nombre) + " · " : ""}${t.limite ? "Fecha límite: " + fechaHora(t.limite) : "Sin fecha límite"}</small></div><button class="btn sec" data-a="cerrar">✕</button></div>
     ${t.descripcion ? `<p style="white-space:pre-wrap">${esc(t.descripcion)}</p>` : ""}${reglas ? `<p style="color:var(--mute);font-size:13px;margin:6px 0">${reglas}</p>` : ""}
+    ${yo.rol === "docente" && t.docente_id === yo.id || yo.rol === "docente" && porCursoInst(t.institucion_id || (c && c.institucion_id)) ? formPlazo(t) : ""}
     <h3 style="font-size:15px">Archivos de la tarea</h3>${listaArchivos(mats, !alumno && dueno)}${yo.rol === "docente" ? formSubida(t.curso_id, t.id, "material") : ""}
     ${cuerpo}${!alumno && dueno ? `<hr class="sep"><button class="btn sec" data-a="tarea-borrar" data-id="${t.id}">Eliminar esta tarea y sus entregas</button>` : ""}</div>`;
 }
+// Documentos de información (sueltos en un curso): una fila con curso, descarga y, para el docente, quitar
+const docsInfo = () => archivos.filter(a => a.tipo === "material" && !a.tarea_id);
+function filaDoc(a, borrar) {
+  const c = cursoDe(a.curso_id);
+  return `<div class="card" style="margin:0 0 10px;padding:12px 14px;border-left:3px solid var(--mute);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+    <div>${etiquetaApoyo}<b>${esc(a.nombre)}</b><small style="display:block;color:var(--mute)">${c ? esc(c.nombre) + " · " : ""}${fmtTam(a.tam || 0)} · ${fechaHora(a.creado)}</small></div>
+    <div style="display:flex;gap:8px"><button class="btn sm sec" data-a="archivo-bajar" data-id="${a.id}">Descargar</button>${borrar ? `<button class="btn sm sec" data-a="archivo-borrar" data-id="${a.id}">Quitar</button>` : ""}</div></div>`;
+}
 function vTareas() {
-  const ts = tareas.slice(), alumno = yo.rol === "alumno";
+  const ts = tareas.slice(), alumno = yo.rol === "alumno", docs = docsInfo();
   if (alumno) {   // las pendientes primero (por fecha límite), luego las entregadas
     const m = miEstudiante(), pend = ts.filter(t => !entregaDe(t, m)).sort((a, b) => (a.limite ? new Date(a.limite) : 8e15) - (b.limite ? new Date(b.limite) : 8e15)), hechas = ts.filter(t => entregaDe(t, m));
     return `<div class="card"><h2>Tareas pendientes <small>${pend.length}</small></h2>${pend.map(t => filaTarea(t, true)).join("") || `<div class="empty">No tienes tareas pendientes.</div>`}</div>
-      <div class="card"><h2>Entregadas <small>${hechas.length}</small></h2>${hechas.map(t => filaTarea(t, true)).join("") || `<div class="empty">Aún no has entregado ninguna.</div>`}</div>`;
+      <div class="card"><h2>Entregadas <small>${hechas.length}</small></h2>${hechas.map(t => filaTarea(t, true)).join("") || `<div class="empty">Aún no has entregado ninguna.</div>`}</div>
+      <div class="card"><h2>Documentos de información <small>${docs.length}</small></h2>${docs.map(a => filaDoc(a, false)).join("") || `<div class="empty">Tus docentes aún no han subido documentos.</div>`}</div>`;
   }
-  return `${formTarea(null)}<div class="card"><h2>Tareas <small>${ts.length}</small></h2>${ts.map(t => filaTarea(t, true)).join("") || `<div class="empty">Aún no hay tareas. Crea la primera arriba.</div>`}</div>`;
+  return `${formTarea(null)}<div class="card"><h2>Tareas <small>${ts.length}</small></h2>${ts.map(t => filaTarea(t, true)).join("") || `<div class="empty">Aún no hay tareas. Crea la primera arriba.</div>`}</div>
+    <div class="card"><h2>Documentos de información <small>${docs.length}</small></h2>${docs.map(a => filaDoc(a, yo.rol === "docente")).join("") || `<div class="empty">Aún no hay documentos de información.</div>`}</div>`;
 }
 function repintarTareas() {
   const m = $("#dlgBody [data-tarea]"), ct = $("#dlgBody [data-cursotab]");
@@ -2241,13 +2259,12 @@ document.addEventListener("change", ev => {
   else if (t.id === "invRol" || t.id === "invInst") actualizarFormInvitar();
   else if (t.id === "perSel") { periodoSel = t.value ? Number(t.value) : null; conTransicion(render); if (detalleId) renderDetalle(); }
   else if (t.id === "perCal") repintarCal();
-  else if (t.id === "tipoPub") {   // tarea o material de apoyo: se muestran solo los campos que corresponden
-    const ap = t.value === "apoyo", fm = t.closest("form"), solo = fm.querySelector("[data-solo=tarea]");
-    solo.hidden = ap; solo.querySelectorAll("input,select,textarea").forEach(x => { x.disabled = ap; });
-    fm.titulo.required = !ap; fm.archivo.required = ap;
-    $("#pistaArchivo").textContent = ap ? "obligatorio" : "opcional: se sube junto con la tarea"; fm.querySelector("button.btn").textContent = ap ? "Publicar material de apoyo" : "Crear tarea";
+  else if (t.name === "tipo" && t.closest("#fTarea")) {   // tarea o documento de información: se muestran solo los campos que corresponden
+    const fm = t.closest("form"), info = fm.tipo.value === "info", solo = fm.querySelector("[data-solo=tarea]");
+    solo.hidden = info; solo.querySelectorAll("input,select,textarea").forEach(x => { x.disabled = info; });
+    fm.titulo.required = !info; fm.archivo.required = info;
+    $("#pistaArchivo").textContent = info ? "obligatorio" : "opcional: se sube junto con la tarea"; fm.querySelector("button.btn").textContent = info ? "Subir documento de información" : "Crear carpeta";
   }
-  else if (t.id === "segFiltro" || t.id === "segInst" || t.id === "segRol") { if (t.id === "segFiltro") segFiltro = t.value; else if (t.id === "segInst") segInst = t.value; else segRol = t.value; $("#main").innerHTML = vSeguridad(); }
   else if (t.id === "instWs") { const dom = $("#instDom"); dom.required = t.value === "si"; if (t.value === "si") dom.focus(); }
   else if (t.id === "mInst" || t.id === "mRol") {
     masivo.texto = $("#masTexto").value; masivo.orden = $("#fMas").orden.value;
@@ -2306,9 +2323,9 @@ document.addEventListener("submit", ev => {
       const file = d.archivo && d.archivo.size ? d.archivo : null, curso = Number(d.curso);
       if (file && file.size > MAX_ARCHIVO) falla("El archivo pesa " + fmtTam(file.size) + ": el máximo es 4 MB.");
       const subir = (tarea) => leerBase64(file).then(b64 => rpc("subir_archivo", { p_curso: curso, p_tarea: tarea, p_tipo: "material", p_nombre: file.name, p_mime: file.type || "", p_contenido: b64 }));
-      if (d.tipo === "apoyo") {
-        if (!file) falla("Elige el archivo de apoyo que quieres compartir.");
-        await subir(null); await recargarTareas(); repintarTareas(); toast("Material de apoyo publicado. Se avisó a los alumnos.");
+      if (d.tipo === "info") {
+        if (!file) falla("Elige el documento que quieres compartir.");
+        await subir(null); await recargarTareas(); repintarTareas(); toast("Documento de información publicado. Se avisó a los alumnos.");
       } else {
         const id = await rpc("crear_tarea", { p_curso: curso, p_titulo: d.titulo, p_descripcion: d.descripcion || "", p_limite: d.limite ? new Date(d.limite).toISOString() : null,
           p_periodo: d.periodo ? Number(d.periodo) : null, p_peso: d.peso ? Number(d.peso) : 1, p_cero_auto: !!d.cero && !!d.limite });
@@ -2316,6 +2333,9 @@ document.addEventListener("submit", ev => {
         if (file) { try { await subir(id); } catch (e) { aviso = " Pero el archivo no se pudo subir: " + e.message; } }
         await recargarTareas(); repintarTareas(); toast("Tarea creada" + (file && !aviso ? " con su archivo" : "") + "." + aviso);
       }
+    } else if (f.id === "fPlazo") {
+      await rpc("ampliar_plazo", { p_tarea: Number(f.dataset.t), p_limite: new Date(d.limite).toISOString() });
+      await recargarTareas(); try { await recargarEst(); } catch {} repintarTareas(); toast("Plazo actualizado. Se avisó a los alumnos.");
     } else if (f.classList.contains("fSubida")) {
       const file = f.archivo.files[0]; if (!file) falla("Elige un archivo.");
       if (file.size > MAX_ARCHIVO) falla("El archivo pesa " + fmtTam(file.size) + ": el máximo es 4 MB.");
