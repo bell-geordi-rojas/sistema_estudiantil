@@ -2357,6 +2357,32 @@ begin
   end loop;
 end $$;
 
+-- Row Level Security siempre activo: se activa en toda tabla de public que no lo tenga y en las que se creen mas adelante
+-- (una tabla creada a mano en el panel sin RLS quedaria abierta a internet). Sin politicas, una tabla queda cerrada del todo.
+do $$
+declare x record;
+begin
+  for x in select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+           where n.nspname = 'public' and c.relkind in ('r', 'p') and not c.relrowsecurity loop
+    execute format('alter table public.%I enable row level security', x.relname);
+  end loop;
+end $$;
+create or replace function _rls_automatico() returns event_trigger language plpgsql security definer set search_path = public as $$
+declare o record;
+begin
+  for o in select * from pg_event_trigger_ddl_commands() where command_tag in ('CREATE TABLE', 'CREATE TABLE AS') and schema_name = 'public' loop
+    execute format('alter table %s enable row level security', o.object_identity);
+  end loop;
+end $$;
+revoke execute on function _rls_automatico() from public, anon, authenticated;
+do $$
+begin
+  if not exists (select 1 from pg_event_trigger where evtname = 'rls_automatico') then
+    execute 'create event trigger rls_automatico on ddl_command_end when tag in (''CREATE TABLE'', ''CREATE TABLE AS'') execute function public._rls_automatico()';
+  end if;
+exception when others then null;   -- si tu plan no permite triggers de evento, se omite sin error
+end $$;
+
 -- La API de datos de Supabase se hace menos visible: sin catalogo OpenAPI publico (nadie puede listar tablas y funciones desde internet),
 -- con un maximo de 1000 filas por respuesta y sin GraphQL (no se usa). Si tu plan no permite alguno de estos ajustes, se omite sin error.
 do $$
