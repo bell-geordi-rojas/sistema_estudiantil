@@ -1859,8 +1859,8 @@ document.addEventListener("keydown", ev => { if ((ev.key === "Enter" || ev.key =
 /* ===== Sonidos suaves al tocar: se sintetizan con Web Audio (no hay archivos) y se apagan en «Mi cuenta» ===== */
 const sonidosActivos = () => { try { return localStorage.getItem("sonidos") !== "off"; } catch { return true; } };
 let ctxAudio = null, ultimoSonido = 0;
-// [frecuencia Hz, inicio s, fin s, volumen]. Notas medias-agudas (los altavoces del celular y del portátil las reproducen mejor) y onda triangular (se oye más que una senoidal).
-const NOTAS_SONIDO = { tap: [[1100, 0, .09, .7, "square"]], abrir: [[700, 0, .1, .65, "square"], [1050, .06, .22, .65, "square"]], ok: [[784, 0, .14, .75, "triangle"], [1175, .12, .4, .75, "triangle"]], error: [[330, 0, .22, .75, "triangle"], [247, .17, .5, .75, "triangle"]] };   // volumen base (medio)
+// [frecuencia Hz, inicio s, fin s, volumen, onda]: el timbre original (suave, senoidal) con el volumen alto
+const NOTAS_SONIDO = { tap: [[760, 0, .05, .85, "sine"]], abrir: [[520, 0, .06, .85, "sine"], [780, .05, .12, .85, "sine"]], ok: [[660, 0, .09, .85, "sine"], [990, .09, .2, .85, "sine"]], error: [[260, 0, .14, .85, "triangle"], [200, .12, .28, .85, "triangle"]] };   // volumen base (medio)
 const volumenSonido = () => { try { return { bajo: 0.45, medio: 1, alto: 1.6 }[localStorage.getItem("volumen")] || 1; } catch { return 1; } };
 function sonar(tipo = "tap") {
   if (!sonidosActivos()) return;
