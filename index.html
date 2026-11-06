@@ -1776,7 +1776,7 @@ function montarLegal() {
 }
 avisoAlmacenamiento();
 /* ===== Tareas: el docente crea carpetas con material y los alumnos entregan su trabajo (PDF o Word) ===== */
-const SEL_TAREAS = ["tareas?select=id,curso_id,docente_id,titulo,descripcion,limite,creado,periodo_id,peso,cero_auto,cerrada&order=creado.desc",
+const SEL_TAREAS = ["tareas?select=id,curso_id,docente_id,titulo,descripcion,limite,creado,periodo_id,peso,cero_auto,cerrada,grados&order=creado.desc",
   "tarea_archivos?select=id,curso_id,tarea_id,tipo,estudiante_id,subido_por,nombre,mime,tam,creado&order=creado"];
 const SEL_TAREAS_BASE = "tareas?select=id,curso_id,docente_id,titulo,descripcion,limite,creado&order=creado.desc";   // por si la base aún no tiene las columnas nuevas
 async function recargarTareas() {
@@ -1814,7 +1814,7 @@ const etiquetaApoyo = `<span class="chip" style="padding:1px 8px;font-size:11px;
 function filaTarea(t, conCurso) {
   const c = cursoDe(t.curso_id);
   return `<div class="card" style="margin:0 0 10px;padding:12px 14px;border-left:3px solid var(--teal);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-    <div>${etiquetaTarea}<b>${esc(t.titulo)}</b><small style="display:block;color:var(--mute)">${conCurso && c ? esc(c.nombre) + " · " : ""}${t.limite ? "Fecha límite: " + fechaHora(t.limite) : "Sin fecha límite"}</small></div>
+    <div>${etiquetaTarea}<b>${esc(t.titulo)}</b><small style="display:block;color:var(--mute)">${conCurso && c ? esc(c.nombre) + " · " : ""}${destinoTarea(t) ? esc(destinoTarea(t)) + " · " : ""}${t.limite ? "Fecha límite: " + fechaHora(t.limite) : "Sin fecha límite"}</small></div>
     <div style="display:flex;gap:8px;align-items:center">${estadoTarea(t)}<button class="btn sm sec" data-a="tarea-abrir" data-id="${t.id}">Abrir</button></div></div>`;
 }
 // Formulario único: una TAREA (con su archivo adjunto, opcional) o un MATERIAL DE APOYO (solo información, sin entrega ni nota)
@@ -1826,7 +1826,7 @@ function formTarea(cursoFijo) {
   return `<form id="fTarea" class="card" style="margin:0 0 14px"><h2 style="margin-top:0">Nueva carpeta</h2>
     ${cursoFijo ? `<input type="hidden" name="curso" value="${cursoFijo.id}">` : `<label style="${L}"><span>Curso (los que tienes asignados)</span><select name="curso" required>${cs.map(c => `<option value="${c.id}">${esc(c.nombre)}${etiquetaCurso(c) ? " · " + esc(etiquetaCurso(c)) : ""}</option>`).join("")}</select></label>`}
     <div style="display:grid;gap:8px;margin-bottom:12px">${opcion("tarea", "Tarea", "Los alumnos entregan su trabajo y reciben nota.", true)}${opcion("info", "Documento de información", "Solo para leer o estudiar: no se entrega ni tiene nota.", false)}</div>
-    <div data-solo="tarea"><label style="${L}">Título de la tarea<input name="titulo" maxlength="120" required placeholder="p. ej. Informe de la unidad 2"></label>
+    <div data-solo="tarea"><div id="campoGrados">${campoGrados(cursoFijo || cs[0])}</div><label style="${L}">Título de la tarea<input name="titulo" maxlength="120" required placeholder="p. ej. Informe de la unidad 2"></label>
     <label style="${L}">Instrucciones (opcional)<textarea name="descripcion" rows="3" maxlength="2000"></textarea></label>
     <div class="row2"><label style="${L}">Fecha límite (opcional)<input type="datetime-local" name="limite"></label>
     <div id="campoPeriodo">${campoPeriodo(cursoFijo || cs[0])}</div></div>
@@ -1843,6 +1843,18 @@ function campoPeriodo(c) {
   if (uni && c.ciclo) { const p = ps.find(x => x.orden === c.ciclo); return `<div style="${L}"><span>La nota irá en</span><b style="color:var(--ink);font-size:14px">${esc(p ? p.nombre : "Ciclo " + c.ciclo)} <small>(el ciclo de este curso)</small></b><input type="hidden" name="periodo" value="${p ? p.id : ""}"></div>`; }
   const car = c.carrera_id && carreraDe(c.carrera_id), abiertos = ps.filter(p => (!car || p.orden <= car.ciclos) && periodoAbierto(p, c));
   return `<label style="${L}"><span>La nota va en el periodo</span><select name="periodo"><option value="">Automático (el último abierto)</option>${abiertos.map(p => `<option value="${p.id}">${esc(p.nombre)}</option>`).join("")}</select></label>`;
+}
+// Secundaria: un mismo curso se dicta en varios grados (1.° a 5.°); la tarea puede ir a todo el curso o solo a algunos grados
+const destinoTarea = t => (t.grados || []).map(id => (gradoDe(id) || {}).nombre).filter(Boolean).join(", ");
+function campoGrados(c) {
+  const inst = c && instDeId(c.institucion_id);
+  if (!inst || inst.tipo === "universidad" || inst.nivel !== "secundaria") return "";
+  const gs = grados.filter(g => g.institucion_id === c.institucion_id).sort((a, b) => a.orden - b.orden);
+  if (c.grado_id) return `<p style="margin:0 0 10px;color:var(--mute);font-size:13px">Este curso es de <b style="color:var(--ink)">${esc((gradoDe(c.grado_id) || {}).nombre || "un grado")}</b>: la tarea llega a sus alumnos.</p>`;
+  if (!gs.length) return "";
+  const opc = (v, txt, marcado) => `<label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink)"><input type="radio" name="destino" value="${v}" ${marcado ? "checked" : ""}> ${txt}</label>`;
+  return `<div style="display:grid;gap:6px;margin-bottom:12px"><span style="font-size:13px;color:var(--mute)">¿A quién va dirigida?</span>${opc("curso", "A todo el curso (todos los grados)", true)}${opc("grados", "Solo a algunos grados", false)}
+    <div id="listaGrados" hidden class="chips" style="margin-left:22px">${gs.map(g => `<label class="chk"><input type="checkbox" name="grado" value="${g.id}">${esc(g.nombre)}</label>`).join("")}</div></div>`;
 }
 function formPlazo(t) {
   return `<form id="fPlazo" data-t="${t.id}" class="bar" style="margin:8px 0 12px;align-items:flex-end">
@@ -1873,7 +1885,7 @@ function htmlTarea(id) {
   const c = cursoDe(t.curso_id), alumno = yo.rol === "alumno", mats = archivos.filter(a => a.tipo === "material" && a.tarea_id === t.id);
   const mio = alumno ? miEstudiante() : null, en = alumno ? entregaDe(t, mio) : null;
   const dueno = yo.rol === "admin" || t.docente_id === yo.id, per = t.periodo_id && periodoDe(t.periodo_id);
-  const reglas = `${per ? `Nota en: <b>${esc(per.nombre)}</b>${esUni() && t.peso > 1 ? ` · peso ${t.peso}` : ""}. ` : ""}${t.limite ? (t.cero_auto ? "Si no se entrega a tiempo, la nota es <b>0</b> automáticamente." : "Sin nota automática por no entregar.") : ""}`;
+  const reglas = `${destinoTarea(t) ? `Dirigida a: <b>${esc(destinoTarea(t))}</b>. ` : ""}${per ? `Nota en: <b>${esc(per.nombre)}</b>${esUni() && t.peso > 1 ? ` · peso ${t.peso}` : ""}. ` : ""}${t.limite ? (t.cero_auto ? "Si no se entrega a tiempo, la nota es <b>0</b> automáticamente." : "Sin nota automática por no entregar.") : ""}`;
   let cuerpo;
   if (alumno) {
     const venc = vencida(t) && !en;
@@ -1881,7 +1893,7 @@ function htmlTarea(id) {
       : venc ? `<p class="msg warn">El plazo venció${t.cero_auto ? " y se registró nota 0" : ""}. Ya no se aceptan entregas; si necesitas entregar, pide a tu docente que amplíe el plazo.</p>` : `<p class="msg warn">Aún no has entregado esta tarea.</p>`}
       ${venc ? "" : `${formSubida(t.curso_id, t.id, "entrega")}<p style="color:var(--mute);font-size:12px">PDF o Word, máximo 4 MB.</p>`}`;
   } else {
-    const alumnos = est.filter(e => porCursoInst(t.institucion_id || (c && c.institucion_id)) ? inscrito(e.id, t.curso_id) : e.docente_id === t.docente_id).sort((a, b) => a.nombre.localeCompare(b.nombre));
+    const alumnos = est.filter(e => porCursoInst(t.institucion_id || (c && c.institucion_id)) ? inscrito(e.id, t.curso_id) : e.docente_id === t.docente_id).filter(e => !t.grados || !t.grados.length || t.grados.includes(e.grado_id)).sort((a, b) => a.nombre.localeCompare(b.nombre));
     cuerpo = `<h3 style="font-size:15px">Entregas (${alumnos.filter(e => entregaDe(t, e)).length} de ${alumnos.length})</h3><div class="scroll"><table><thead><tr><th>Alumno</th><th>Entrega</th><th></th></tr></thead><tbody>` +
       (alumnos.map(e => { const a = entregaDe(t, e); return `<tr><td>${esc(e.nombre)}<small style="display:block;color:var(--mute)">${esc(e.codigo)}</small></td>
         <td>${a ? esc(a.nombre) + `<small style="display:block;color:var(--mute)">${fechaHora(a.creado)}${t.limite && new Date(a.creado) > new Date(t.limite) ? " · con retraso" : ""}</small>` : `<small>Sin entregar${vencida(t) && t.cero_auto ? " · nota 0" : ""}</small>`}</td>
@@ -2273,7 +2285,8 @@ document.addEventListener("change", ev => {
     fm.titulo.required = !info; fm.archivo.required = info;
     $("#pistaArchivo").textContent = info ? "obligatorio" : "opcional: se sube junto con la tarea"; fm.querySelector("button.btn").textContent = info ? "Subir documento de información" : "Crear carpeta";
   }
-  else if (t.name === "curso" && t.closest("#fTarea")) { const cp = $("#campoPeriodo"); if (cp) cp.innerHTML = campoPeriodo(cursoDe(Number(t.value))); }   // el periodo depende del curso elegido
+  else if (t.name === "curso" && t.closest("#fTarea")) { const c = cursoDe(Number(t.value)), cp = $("#campoPeriodo"), cg = $("#campoGrados"); if (cp) cp.innerHTML = campoPeriodo(c); if (cg) cg.innerHTML = campoGrados(c); }
+  else if (t.name === "destino") { const l = $("#listaGrados"); if (l) l.hidden = t.value !== "grados"; }   // el periodo depende del curso elegido
   else if (t.id === "instWs") { const dom = $("#instDom"); dom.required = t.value === "si"; if (t.value === "si") dom.focus(); }
   else if (t.id === "mInst" || t.id === "mRol") {
     masivo.texto = $("#masTexto").value; masivo.orden = $("#fMas").orden.value;
@@ -2336,7 +2349,9 @@ document.addEventListener("submit", ev => {
         if (!file) falla("Elige el documento que quieres compartir.");
         await subir(null); await recargarTareas(); repintarTareas(); toast("Documento de información publicado. Se avisó a los alumnos.");
       } else {
-        const id = await rpc("crear_tarea", { p_curso: curso, p_titulo: d.titulo, p_descripcion: d.descripcion || "", p_limite: d.limite ? new Date(d.limite).toISOString() : null,
+        let grs = null;
+        if (d.destino === "grados") { grs = [...f.querySelectorAll("input[name=grado]:checked")].map(x => Number(x.value)); if (!grs.length) falla("Marca al menos un grado, o elige «A todo el curso»."); }
+        const id = await rpc("crear_tarea", { p_grados: grs, p_curso: curso, p_titulo: d.titulo, p_descripcion: d.descripcion || "", p_limite: d.limite ? new Date(d.limite).toISOString() : null,
           p_periodo: d.periodo ? Number(d.periodo) : null, p_peso: d.peso ? Number(d.peso) : 1, p_cero_auto: !!d.cero && !!d.limite });
         let aviso = "";
         if (file) { try { await subir(id); } catch (e) { aviso = " Pero el archivo no se pudo subir: " + e.message; } }

@@ -190,6 +190,7 @@ create table if not exists tarea_archivos (
 );
 create index if not exists tarea_archivos_tarea on tarea_archivos (tarea_id);
 create index if not exists tarea_archivos_curso on tarea_archivos (curso_id);
+alter table tareas add column if not exists grados bigint[];   -- secundaria: grados a los que va la tarea (nulo = todo el curso)
 alter table tareas enable row level security;
 alter table tarea_archivos enable row level security;
 alter table carreras enable row level security;
@@ -598,6 +599,25 @@ create or replace function _tarea_visible(p_curso bigint, p_docente uuid) return
     or (mi_rol() = 'docente' and c.institucion_id = mi_inst() and ((_por_curso(c.institucion_id) and _ensena(c.id)) or (not _por_curso(c.institucion_id) and p_docente = auth.uid())))
     or (mi_rol() = 'alumno' and c.institucion_id = mi_inst() and ((_por_curso(c.institucion_id) and _inscrito(_mi_estudiante(), c.id)) or (not _por_curso(c.institucion_id) and p_docente = mi_docente()))))) $$;
 
+-- La tarea va dirigida a mi grado (o a todo el curso). Para el personal siempre es verdadero.
+create or replace function _tarea_para_mi(p_tarea bigint) returns boolean language plpgsql stable security definer set search_path = public as $$
+begin
+  if mi_rol() is distinct from 'alumno' then return true; end if;
+  return exists (select 1 from tareas t where t.id = p_tarea and (coalesce(cardinality(t.grados), 0) = 0
+           or exists (select 1 from estudiantes e where e.id = _mi_estudiante() and e.grado_id = any (t.grados))));
+end $$;
+-- Alumnos a los que les toca una tarea: los inscritos en el curso (o los del aula, en primaria), solo de los grados elegidos si los hay
+create or replace function _alumnos_tarea(p_tarea bigint) returns table (est bigint, perfil uuid) language plpgsql stable security definer set search_path = public as $$
+begin
+  return query
+    select e.id, e.perfil_id from tareas t join estudiantes e on e.institucion_id = t.institucion_id
+    where t.id = p_tarea
+      and (case when _por_curso(t.institucion_id)
+                then exists (select 1 from inscripciones i where i.estudiante_id = e.id and i.curso_id = t.curso_id)
+                else e.docente_id = t.docente_id end)
+      and (coalesce(cardinality(t.grados), 0) = 0 or e.grado_id = any (t.grados));
+end $$;
+
 -- El usuario actual puede modificar los datos de ese estudiante (admin de su institucion; en primaria tambien su docente a cargo)
 create or replace function _puedo_gestionar(p_est bigint) returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from estudiantes e where e.id = p_est and (
@@ -702,10 +722,10 @@ create policy insc_sel on inscripciones for select to authenticated using (
   or (mi_rol() = 'alumno' and (estudiante_id = _mi_estudiante() or _inscrito(_mi_estudiante(), curso_id))));
 
 drop policy if exists tareas_sel on tareas;
-create policy tareas_sel on tareas for select to authenticated using (_tarea_visible(curso_id, docente_id));
+create policy tareas_sel on tareas for select to authenticated using (_tarea_visible(curso_id, docente_id) and _tarea_para_mi(id));
 drop policy if exists tarea_archivos_sel on tarea_archivos;
 create policy tarea_archivos_sel on tarea_archivos for select to authenticated using (
-  (tipo = 'material' and _tarea_visible(curso_id, docente_id))
+  (tipo = 'material' and _tarea_visible(curso_id, docente_id) and (tarea_id is null or _tarea_para_mi(tarea_id)))
   or (tipo = 'entrega' and (estudiante_id = _mi_estudiante() or (mi_rol() <> 'alumno' and _tarea_visible(curso_id, docente_id)))));
 
 drop policy if exists grados_sel on grados;
@@ -1916,10 +1936,12 @@ end $$;
 -- Tareas y archivos (docente: crea carpetas y sube material; alumno: entrega su trabajo)
 -- ---------------------------------------------------------------------------
 drop function if exists crear_tarea(bigint, text, text, timestamptz);
+drop function if exists crear_tarea(bigint, text, text, timestamptz, bigint, int, boolean);
 create or replace function crear_tarea(p_curso bigint, p_titulo text, p_descripcion text default '', p_limite timestamptz default null,
-                                       p_periodo bigint default null, p_peso int default 1, p_cero_auto boolean default true) returns bigint
+                                       p_periodo bigint default null, p_peso int default 1, p_cero_auto boolean default true,
+                                       p_grados bigint[] default null) returns bigint
 language plpgsql security definer set search_path = public as $$
-declare v_inst bigint; v_id bigint; v_per bigint;
+declare v_inst bigint; v_id bigint; v_per bigint; v_gr bigint[];
 begin
   if mi_rol() not in ('admin', 'docente') then raise exception 'No autorizado.'; end if;
   select institucion_id into v_inst from cursos where id = p_curso;
@@ -1942,12 +1964,29 @@ begin
       order by p.orden desc limit 1;
   end if;
   if v_per is null or not exists (select 1 from periodos where id = v_per and institucion_id = v_inst) then raise exception 'Periodo invalido.'; end if;
-  insert into tareas (institucion_id, curso_id, docente_id, titulo, descripcion, limite, periodo_id, peso, cero_auto)
+  -- grados destinatarios (solo colegio secundaria, y solo si el curso no es ya de un grado concreto); sin grados = todo el curso
+  v_gr := null;
+  if coalesce(cardinality(p_grados), 0) > 0
+     and exists (select 1 from instituciones where id = v_inst and tipo = 'colegio' and nivel = 'secundaria')
+     and exists (select 1 from cursos where id = p_curso and grado_id is null) then
+    if exists (select 1 from unnest(p_grados) g where not exists (select 1 from grados where id = g and institucion_id = v_inst)) then raise exception 'Grado invalido.'; end if;
+    select array_agg(distinct g) into v_gr from unnest(p_grados) g;
+  end if;
+  insert into tareas (institucion_id, curso_id, docente_id, titulo, descripcion, limite, periodo_id, peso, cero_auto, grados)
     values (v_inst, p_curso, auth.uid(), p_titulo, left(coalesce(p_descripcion, ''), 2000), p_limite, v_per,
-            least(greatest(coalesce(p_peso, 1), 1), 10), coalesce(p_cero_auto, true) and p_limite is not null) returning id into v_id;
-  perform _notificar_curso(p_curso, 'publicó la tarea «' || p_titulo || '» en «' || (select nombre from cursos where id = p_curso) || '»'
+            least(greatest(coalesce(p_peso, 1), 1), 10), coalesce(p_cero_auto, true) and p_limite is not null, v_gr) returning id into v_id;
+  perform _notificar_tarea(v_id, 'publicó la tarea «' || p_titulo || '» en «' || (select nombre from cursos where id = p_curso) || '»'
     || case when p_limite is null then '.' else ', con fecha límite ' || to_char(p_limite at time zone 'America/Lima', 'DD/MM/YYYY HH24:MI') || '.' end);
   return v_id;
+end $$;
+
+-- Avisa a los alumnos a los que les toca una tarea
+create or replace function _notificar_tarea(p_tarea bigint, p_msg text) returns void language plpgsql security definer set search_path = public as $$
+declare r record;
+begin
+  for r in select a.perfil from _alumnos_tarea(p_tarea) a where a.perfil is not null loop
+    perform _notificar(r.perfil, p_msg);
+  end loop;
 end $$;
 
 -- Tareas vencidas: a quien no entrego nada se le pone nota 0 en el periodo de la tarea (una sola vez por tarea).
@@ -1958,13 +1997,9 @@ begin
   for t in select * from tareas where not cerrada and limite is not null and limite < now() order by limite limit 200 loop
     v_total := 0;
     if t.cero_auto and t.periodo_id is not null then
-      for r in select e.id as est, e.perfil_id from estudiantes e
-               where e.institucion_id = t.institucion_id
-                 and (case when _por_curso(t.institucion_id)
-                           then exists (select 1 from inscripciones i where i.estudiante_id = e.id and i.curso_id = t.curso_id)
-                           else e.docente_id = t.docente_id end)
-                 and not exists (select 1 from tarea_archivos a where a.tarea_id = t.id and a.tipo = 'entrega' and a.estudiante_id = e.id)
-                 and not exists (select 1 from notas x where x.tarea_id = t.id and x.estudiante_id = e.id)
+      for r in select a.est, a.perfil as perfil_id from _alumnos_tarea(t.id) a
+               where not exists (select 1 from tarea_archivos z where z.tarea_id = t.id and z.tipo = 'entrega' and z.estudiante_id = a.est)
+                 and not exists (select 1 from notas x where x.tarea_id = t.id and x.estudiante_id = a.est)
       loop
         begin
           insert into notas (estudiante_id, curso_id, periodo_id, nota, peso, titulo, tarea_id)
@@ -2008,7 +2043,7 @@ begin
   -- quien recibio 0 automatico por no entregar tiene otra oportunidad: ese 0 se retira
   delete from notas where tarea_id = p_tarea and nota = 0
     and estudiante_id not in (select estudiante_id from tarea_archivos where tarea_id = p_tarea and tipo = 'entrega' and estudiante_id is not null);
-  perform _notificar_curso(t.curso_id, 'amplió el plazo de la tarea «' || t.titulo || '» hasta el ' || to_char(p_limite at time zone 'America/Lima', 'DD/MM/YYYY HH24:MI') || '.');
+  perform _notificar_tarea(p_tarea, 'amplió el plazo de la tarea «' || t.titulo || '» hasta el ' || to_char(p_limite at time zone 'America/Lima', 'DD/MM/YYYY HH24:MI') || '.');
 end $$;
 
 create or replace function eliminar_tarea(p_id bigint) returns void
@@ -2051,6 +2086,7 @@ begin
     if mi_rol() <> 'alumno' or p_tarea is null then raise exception 'No autorizado.'; end if;
     v_est := _mi_estudiante();
     if v_est is null or not _tarea_visible(p_curso, t.docente_id) then raise exception 'Esta tarea no es de tus cursos.'; end if;
+    if not _tarea_para_mi(p_tarea) then raise exception 'Esta tarea no es de tu grado.'; end if;
     if t.limite is not null and t.limite < now() then raise exception 'El plazo de esta tarea venció. Pide a tu docente que lo amplíe.'; end if;
     if v_ext is null or v_ext not in ('pdf', 'doc', 'docx') then raise exception 'Sube tu tarea en PDF o Word (.pdf, .doc, .docx).'; end if;
     delete from tarea_archivos where tarea_id = p_tarea and tipo = 'entrega' and estudiante_id = v_est;
@@ -2272,7 +2308,7 @@ begin
   for f in select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname = any (array[
              '_generar_usuario', '_crear_invitacion', '_puede_resolver_solicitud', '_puede_invitacion', '_puedo_gestionar', '_alcance_perfil', 'crear_invitacion_dueno',
-             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario', '_enviar_credenciales', 'configurar_correo', '_sembrar_carreras', '_migrar_a_cursos', '_ciclos_defecto', '_puedo_calificar', '_autoinscribir_estudiante', '_autoinscribir_curso', '_notificar', '_notificar_est', '_notificar_curso', '_sembrar_grados', '_evento', '_limitar', '_t_borrado_masivo', '_t_notas_masivas', '_cerrar_vencidas'])
+             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario', '_enviar_credenciales', 'configurar_correo', '_sembrar_carreras', '_migrar_a_cursos', '_ciclos_defecto', '_puedo_calificar', '_autoinscribir_estudiante', '_autoinscribir_curso', '_notificar', '_notificar_est', '_notificar_curso', '_sembrar_grados', '_evento', '_limitar', '_t_borrado_masivo', '_t_notas_masivas', '_cerrar_vencidas', '_alumnos_tarea', '_notificar_tarea'])
   loop
     execute format('revoke all on function %s from public, anon, authenticated', f);
   end loop;
