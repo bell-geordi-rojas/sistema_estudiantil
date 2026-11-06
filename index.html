@@ -1369,7 +1369,8 @@ function vCuenta() {
     <div class="err"></div><div><button class="btn">Guardar nombre</button></div></form></div>
     <div class="card"><h2>Apariencia</h2><p style="margin-top:0;color:var(--mute)">Efectos visuales: fundido entre pantallas, ventanas que crecen desde su tarjeta, desenfoque y zoom al pasar el cursor. Si te molestan o el equipo va lento, apágalos. También hay sonidos suaves al tocar botones y al terminar un proceso.</p>
     <div class="bar"><button class="btn ${efectosActivos() ? "sec" : ""}" data-a="efectos">${efectosActivos() ? "Desactivar efectos visuales" : "Activar efectos visuales"}</button>
-    <button class="btn ${sonidosActivos() ? "sec" : ""}" data-a="sonidos">${sonidosActivos() ? "Desactivar sonidos" : "Activar sonidos"}</button></div></div>
+    <button class="btn ${sonidosActivos() ? "sec" : ""}" data-a="sonidos">${sonidosActivos() ? "Desactivar sonidos" : "Activar sonidos"}</button>
+    ${sonidosActivos() ? `<label style="display:flex;gap:6px;align-items:center;font-size:13px">Volumen <select id="volSon" aria-label="Volumen de los sonidos">${[["bajo", "Bajo"], ["medio", "Medio"], ["alto", "Alto"]].map(([v, n]) => `<option value="${v}" ${(localStorage.getItem("volumen") || "medio") === v ? "selected" : ""}>${n}</option>`).join("")}</select></label>` : ""}</div></div>
     <div class="card"><h2>Cambiar contraseña</h2><form class="form" id="fPass"><label>Nueva contraseña (mín. 8, con letras y números)<input type="password" name="a" minlength="8" required autocomplete="new-password"></label>${medidorHTML()}
     <label>Repite la contraseña<input type="password" name="b" minlength="8" required autocomplete="new-password"></label>
     <div class="err"></div><div><button class="btn">Cambiar contraseña</button></div></form></div>`;
@@ -1858,7 +1859,8 @@ document.addEventListener("keydown", ev => { if ((ev.key === "Enter" || ev.key =
 /* ===== Sonidos suaves al tocar: se sintetizan con Web Audio (no hay archivos) y se apagan en «Mi cuenta» ===== */
 const sonidosActivos = () => { try { return localStorage.getItem("sonidos") !== "off"; } catch { return true; } };
 let ctxAudio = null, ultimoSonido = 0;
-const NOTAS_SONIDO = { tap: [[760, 0, .05, .04]], abrir: [[520, 0, .06, .04], [780, .05, .12, .04]], ok: [[660, 0, .09, .06], [990, .09, .2, .06]], error: [[260, 0, .14, .06], [200, .12, .28, .06]] };
+const NOTAS_SONIDO = { tap: [[760, 0, .07, .17]], abrir: [[520, 0, .08, .17], [780, .06, .16, .17]], ok: [[660, 0, .11, .24], [990, .1, .26, .24]], error: [[260, 0, .17, .24], [200, .14, .34, .24]] };   // volumen base (medio)
+const volumenSonido = () => { try { return { bajo: 0.5, medio: 1, alto: 1.8 }[localStorage.getItem("volumen")] || 1; } catch { return 1; } };
 function sonar(tipo = "tap") {
   if (!sonidosActivos()) return;
   try {
@@ -1868,7 +1870,7 @@ function sonar(tipo = "tap") {
     const t0 = ctxAudio.currentTime;
     for (const [f, ini, fin, vol] of NOTAS_SONIDO[tipo] || []) {
       const o = ctxAudio.createOscillator(), g = ctxAudio.createGain(); o.type = tipo === "error" ? "triangle" : "sine"; o.frequency.value = f;
-      g.gain.setValueAtTime(0.0001, t0 + ini); g.gain.exponentialRampToValueAtTime(vol, t0 + ini + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t0 + fin);
+      g.gain.setValueAtTime(0.0001, t0 + ini); g.gain.exponentialRampToValueAtTime(Math.min(0.9, vol * volumenSonido()), t0 + ini + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t0 + fin);
       o.connect(g).connect(ctxAudio.destination); o.start(t0 + ini); o.stop(t0 + fin + 0.02);
     }
   } catch {}
@@ -2417,6 +2419,7 @@ document.addEventListener("change", ev => {
   else if (t.id === "invRol" || t.id === "invInst") actualizarFormInvitar();
   else if (t.id === "perSel") { periodoSel = t.value ? Number(t.value) : null; conTransicion(render); if (detalleId) renderDetalle(); }
   else if (t.id === "perCal") repintarCal();
+  else if (t.id === "volSon") { guardarLocal("volumen", t.value); sonar("ok"); }   // al cambiar el volumen suena una muestra
   else if (t.name === "tipo" && t.closest("#fTarea")) {   // tarea o documento de información: se muestran solo los campos que corresponden
     const fm = t.closest("form"), info = fm.tipo.value === "info", solo = fm.querySelector("[data-solo=tarea]");
     solo.hidden = info; solo.querySelectorAll("input,select,textarea").forEach(x => { x.disabled = info; });
