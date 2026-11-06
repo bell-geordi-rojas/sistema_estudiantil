@@ -22,18 +22,18 @@ try { document.documentElement.dataset.efectos = localStorage.getItem("efectos")
   color-scheme:light;
   --teal:#0e9aa7; --teal-d:#0b7f8a; --bg:#f3f5f9; --card:#fff; --ink:#1f2937; --mute:#6b7280; --line:#e8ebf1; --row:#f0f2f6;
   --side:#f7f8fc; --hover:#eceffa; --violet-l:#e6d9fb; --violet-ink:#5b21b6; --nav-on:#4c1d95; --input-bg:#fff; --input-bd:#d6dbe6;
-  --chip-on:#e9eefc; --chip-bd:#c9d6fa; --green:#10b981; --red:#ef4444; --shadow:0 1px 3px rgba(20,30,60,.07);
+  --chip-on:#e9eefc; --chip-bd:#c9d6fa; --green:#10b981; --red:#ef4444; --shadow:0 10px 30px rgba(20,30,60,.09),0 2px 6px rgba(20,30,60,.06); --shadow-lg:0 24px 60px rgba(20,30,60,.17),0 4px 12px rgba(20,30,60,.08); --glow1:#dfe9fb; --glow2:#d9f1f2;
   --danger-bd:#fbd0d0; --focus:#9ddde3; --btn-sec:#374151; --ok-bg:#d1fae5; --ok-ink:#065f46; --warn-bg:#fef3c7; --warn-ink:#92400e;
 }
 :root[data-theme=dark]{
   color-scheme:dark;
   --bg:#0f1420; --card:#171d2b; --ink:#e5e9f2; --mute:#8f9ab0; --line:#262e42; --row:#202839; --side:#131926; --hover:#1f2740;
   --violet-l:#2d2250; --violet-ink:#cdb8ff; --nav-on:#e2d4ff; --input-bg:#10151f; --input-bd:#33405a; --chip-on:#1c2a4d; --chip-bd:#2f4380;
-  --shadow:0 1px 3px rgba(0,0,0,.45); --danger-bd:#5b2a2a; --focus:#14656d; --btn-sec:#d5dbe8; --ok-bg:#0f3a2c; --ok-ink:#7ee0b8;
+  --shadow:0 12px 32px rgba(0,0,0,.45),0 2px 8px rgba(0,0,0,.3); --shadow-lg:0 28px 70px rgba(0,0,0,.6),0 4px 14px rgba(0,0,0,.35); --glow1:#1a2748; --glow2:#0f3338; --danger-bd:#5b2a2a; --focus:#14656d; --btn-sec:#d5dbe8; --ok-bg:#0f3a2c; --ok-ink:#7ee0b8;
   --warn-bg:#3d3216; --warn-ink:#f3cf7a;
 }
 *{box-sizing:border-box}
-body{margin:0;font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
+body{margin:0;font-family:"Segoe UI",system-ui,sans-serif;background:radial-gradient(900px 520px at 12% -8%,var(--glow1),transparent 62%),radial-gradient(800px 480px at 100% 0%,var(--glow2),transparent 58%),var(--bg);background-attachment:fixed;color:var(--ink);font-size:14px}
 header{background:var(--teal);color:#fff;min-height:56px;display:flex;align-items:center;padding:6px 20px;gap:14px;flex-wrap:wrap;position:sticky;top:0;z-index:30}
 .logo{font-weight:800;font-size:20px;letter-spacing:.5px;display:flex;align-items:center;gap:8px}
 .logo i{width:28px;height:28px;border-radius:50%;background:#fff;display:inline-block;position:relative}
@@ -58,7 +58,7 @@ main{padding:20px 24px;min-width:0}
 .chip{background:var(--card);border:1px solid var(--line);padding:7px 14px;border-radius:8px;font-size:13px}
 .chip.on{background:var(--chip-on);border-color:var(--chip-bd)}
 .grid{display:grid;grid-template-columns:2fr 1fr;gap:16px}
-.card{background:var(--card);border-radius:10px;box-shadow:var(--shadow);padding:16px;margin-bottom:16px}
+.card{background:var(--card);border-radius:16px;box-shadow:var(--shadow);padding:18px;margin-bottom:18px}
 .card h2{font-size:15px;margin:0 0 12px;display:flex;justify-content:space-between;align-items:center;gap:8px}
 .scroll{overflow-x:auto}
 table{width:100%;border-collapse:collapse}
@@ -94,7 +94,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--focus);border-co
 .msg{padding:10px 12px;border-radius:8px;font-size:13px;background:var(--ok-bg);color:var(--ok-ink)}
 .msg.warn{background:var(--warn-bg);color:var(--warn-ink)}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
-.kpi{background:var(--card);border-radius:10px;padding:14px;box-shadow:var(--shadow)}
+.kpi{background:var(--card);border-radius:14px;padding:14px;box-shadow:var(--shadow)}
 .kpi b{display:block;font-size:26px;margin-top:4px}
 .kpi span{color:var(--mute);font-size:12px}
 .legend{display:flex;gap:14px;justify-content:center;font-size:12px;color:var(--mute);margin-top:8px}
@@ -114,7 +114,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--focus);border-co
 .add{display:flex;gap:6px}
 .add input{flex:1}
 .add .btn{padding:6px 12px}
-dialog{border:0;border-radius:12px;padding:0;background:var(--card);color:var(--ink);width:min(760px,94vw);max-height:90vh;box-shadow:0 20px 50px rgba(0,0,0,.35)}
+dialog{border:0;border-radius:20px;padding:0;background:var(--card);color:var(--ink);width:min(760px,94vw);max-height:90vh;box-shadow:var(--shadow-lg)}
 dialog::backdrop{background:rgba(10,14,24,.45)}
 dialog[data-estrecho]{width:min(380px,92vw)}
 .fotoGrande{display:block;width:100%;aspect-ratio:1;object-fit:cover;border-radius:12px}
@@ -170,15 +170,15 @@ html.vt-pagina main{view-transition-name:contenido}
 .tree li{padding:3px 0}
 .tree summary{cursor:pointer}
 .login{min-height:calc(100vh - 70px);display:grid;place-items:center;padding:20px}
-.login .card{width:min(460px,100%);padding:22px}
+.login .card{width:min(480px,100%);padding:32px;border-radius:24px;box-shadow:var(--shadow-lg);border:1px solid var(--line)}
 .tabs{display:flex;gap:4px;margin-bottom:16px;background:var(--side);padding:4px;border-radius:9px}
 .tabs button{flex:1;border:0;background:none;padding:8px;border-radius:7px;font:inherit;color:var(--mute);cursor:pointer;font-weight:600}
-.tabs button.on{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
+.tabs button.on{background:var(--card);color:var(--ink);box-shadow:0 2px 8px rgba(20,30,60,.14)}
 .dl{border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px;background:var(--side)}
 .cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:20px}
-.ccard{position:relative;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);cursor:pointer;transition:.15s}
-.ccard:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(0,0,0,.25)}
-.banw{border-radius:9px 9px 0 0;overflow:hidden;line-height:0}
+.ccard{position:relative;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);cursor:pointer;transition:.15s}
+.ccard:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg)}
+.banw{border-radius:15px 15px 0 0;overflow:hidden;line-height:0}
 .ban{width:100%;height:126px;display:block}
 .cb{padding:14px 14px 4px;flex:1}
 .ct{color:var(--violet-ink);font-weight:600;line-height:1.35}
