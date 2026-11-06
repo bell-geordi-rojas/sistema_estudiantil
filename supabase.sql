@@ -85,7 +85,7 @@ create table if not exists estudiantes (
   docente_id uuid references perfiles (id) on delete set null,
   perfil_id uuid unique references perfiles (id) on delete set null,   -- cuenta del alumno, si la tiene
   codigo text not null check (codigo ~ '^[A-Za-z0-9]{1,15}$'),
-  nombre text not null check (length(nombre) between 1 and 100 and nombre !~ '[0-9|]')
+  nombre text not null check (length(nombre) between 1 and 100 and nombre !~ '[0-9|<>]')
 );
 create unique index if not exists estudiantes_codigo_inst_unico on estudiantes (institucion_id, upper(codigo));
 create index if not exists estudiantes_docente on estudiantes (docente_id);
@@ -263,6 +263,18 @@ create table if not exists notificaciones (
 );
 create index if not exists notificaciones_perfil on notificaciones (perfil_id, creado desc);
 alter table notificaciones enable row level security;
+alter table notificaciones add column if not exists grupo text;
+alter table notificaciones add column if not exists veces int not null default 1;
+-- Papelera: copia de lo que se borra (estudiantes con sus notas) durante 60 dias; solo la ve el dueño
+create table if not exists papelera (
+  id bigint generated always as identity primary key,
+  institucion_id bigint,
+  tipo text not null,
+  datos jsonb not null,
+  eliminado_por uuid,
+  creado timestamptz not null default now()
+);
+alter table papelera enable row level security;
 
 create or replace function _ciclos_defecto(p_nombre text) returns int language sql immutable as $$ select case when p_nombre ~* 'medicina' then 14 else 10 end $$;
 
@@ -564,6 +576,12 @@ create or replace function _comparten_curso(p_est bigint) returns boolean langua
                  where a.estudiante_id = p_est and b.estudiante_id = (select id from estudiantes where perfil_id = auth.uid())) $$;
 create or replace function _comparten_perfil(p_perfil uuid) returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from estudiantes e where e.perfil_id = p_perfil and _comparten_curso(e.id)) $$;
+-- Companeros del alumno actual (una sola consulta, no una por fila)
+create or replace function _companeros_est() returns setof bigint language sql stable security definer set search_path = public as $$
+  select distinct a.estudiante_id from inscripciones a
+  where a.curso_id in (select curso_id from inscripciones where estudiante_id = (select id from estudiantes where perfil_id = auth.uid())) $$;
+create or replace function _companeros_perfil() returns setof uuid language sql stable security definer set search_path = public as $$
+  select e.perfil_id from estudiantes e where e.perfil_id is not null and e.id in (select _companeros_est()) $$;
 -- El docente actual dicta algun curso en el que esta inscrito p_est
 create or replace function _docente_ve_est(p_est bigint) returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from inscripciones i join docente_cursos d on d.curso_id = i.curso_id where i.estudiante_id = p_est and d.docente_id = auth.uid()) $$;
@@ -673,7 +691,7 @@ create policy perf_sel on perfiles for select to authenticated using (
   or (mi_rol() = 'admin' and institucion_id = mi_inst())
   or (mi_rol() = 'docente' and (docente_id = auth.uid() or (rol = 'alumno' and _docente_ve_perfil(id)) or (rol = 'docente' and _docente_comparte_curso(id))))
   or (mi_rol() = 'alumno' and (id = mi_docente() or (rol = 'docente' and _docente_de_mis_cursos(id))
-        or (permiso('ver_companeros') and rol = 'alumno' and ((docente_id is not null and docente_id = mi_docente()) or _comparten_perfil(id))))));
+        or (permiso('ver_companeros') and rol = 'alumno' and ((docente_id is not null and docente_id = mi_docente()) or id in (select _companeros_perfil()))))));
 
 drop policy if exists est_sel on estudiantes;
 create policy est_sel on estudiantes for select to authenticated using (
@@ -681,7 +699,7 @@ create policy est_sel on estudiantes for select to authenticated using (
   or (mi_rol() = 'admin' and institucion_id = mi_inst())
   or (mi_rol() = 'docente' and (docente_id = auth.uid() or _docente_ve_est(id)))
   or (mi_rol() = 'alumno' and (perfil_id = auth.uid()
-        or (permiso('ver_companeros') and ((docente_id is not null and docente_id = mi_docente()) or _comparten_curso(id))))));
+        or (permiso('ver_companeros') and ((docente_id is not null and docente_id = mi_docente()) or id in (select _companeros_est()))))));
 
 drop policy if exists notas_sel on notas;
 create policy notas_sel on notas for select to authenticated using (
@@ -741,6 +759,8 @@ create policy anuncios_sel on anuncios for select to authenticated using (
 drop policy if exists notificaciones_sel on notificaciones;
 create policy notificaciones_sel on notificaciones for select to authenticated using (perfil_id = auth.uid());
 
+drop policy if exists papelera_sel on papelera;
+create policy papelera_sel on papelera for select to authenticated using (mi_rol() = 'dueno');
 drop policy if exists eventos_sel on eventos_seguridad;
 create policy eventos_sel on eventos_seguridad for select to authenticated using (mi_rol() = 'dueno');
 
@@ -794,6 +814,7 @@ create or replace function buscar_instituciones(p_q text) returns table (id bigi
 language plpgsql volatile security definer set search_path = public as $$
 begin
   perform _limitar('buscar:' || _ip(), 60, 60);
+  if length(trim(coalesce(p_q, ''))) < 3 then return; end if;   -- no se puede listar todo: hay que escribir al menos 3 letras
   return query
     select i.id, i.nombre from instituciones i
     where i.activa and (i.vence is null or i.vence >= current_date) and not en_mantenimiento()
@@ -805,11 +826,13 @@ create or replace function solicitar_afiliacion(p_institucion bigint, p_nombres 
 returns void language plpgsql security definer set search_path = public as $$
 begin
   perform _limitar('afil:' || _ip(), 10, 600);
+  perform _limitar('afil_inst:' || p_institucion, 20, 3600);   -- aunque cambie de IP, una institucion no recibe mas de 20 solicitudes por hora
+  delete from solicitudes where estado = 'pendiente' and creado < now() - interval '14 days';
   p_nombres := trim(coalesce(p_nombres, ''));
   p_apellidos := trim(coalesce(p_apellidos, ''));
   if en_mantenimiento() then raise exception 'El sistema esta en mantenimiento. Intenta de nuevo mas tarde.'; end if;
   if p_rol not in ('docente', 'alumno') then raise exception 'Rol invalido.'; end if;
-  if p_nombres = '' or p_nombres ~ '[0-9|]' or p_apellidos ~ '[0-9|]' or length(p_nombres || p_apellidos) > 100 then
+  if p_nombres = '' or p_nombres ~ '[0-9|<>]' or p_apellidos ~ '[0-9|<>]' or length(p_nombres || p_apellidos) > 100 then
     raise exception 'Escribe tus nombres y apellidos (sin numeros).';
   end if;
   if not exists (select 1 from instituciones i where i.id = p_institucion and i.activa and (i.vence is null or i.vence >= current_date)) then
@@ -826,7 +849,12 @@ alter table invitaciones add column if not exists vence_en timestamptz not null 
 
 -- IP de quien llama (la pone el servidor de la API)
 create or replace function _ip() returns text language sql stable as $$
-  select coalesce(nullif(trim(split_part(coalesce((nullif(current_setting('request.headers', true), '')::json) ->> 'x-forwarded-for', ''), ',', 1)), ''), 'sin-ip') $$;
+  -- Se usa la IP que pone el servidor (cf-connecting-ip o x-real-ip) o, si no, el ULTIMO valor de x-forwarded-for: el primero lo puede escribir el propio cliente.
+  select coalesce(
+    nullif(trim(coalesce((nullif(current_setting('request.headers', true), '')::json) ->> 'cf-connecting-ip', '')), ''),
+    nullif(trim(coalesce((nullif(current_setting('request.headers', true), '')::json) ->> 'x-real-ip', '')), ''),
+    (regexp_match(coalesce((nullif(current_setting('request.headers', true), '')::json) ->> 'x-forwarded-for', ''), '([^,\s]+)\s*$'))[1],
+    'sin-ip') $$;
 
 create or replace function _evento(p_tipo text, p_detalle text default null, p_gravedad text default 'info', p_usuario text default null) returns void
 language plpgsql security definer set search_path = public as $$
@@ -868,8 +896,9 @@ begin
   if (select count(*) from intentos_activacion where usuario = v_u and creado > now() - interval '15 minutes') >= 8 then
     raise exception 'Demasiados intentos. Espera 15 minutos e intenta de nuevo.';
   end if;
-  select * into inv from invitaciones where usuario = v_u and not usado and vence_en > now();
-  if not found or inv.codigo_hash <> crypt(coalesce(p_codigo, ''), inv.codigo_hash) then
+  select * into inv from invitaciones where usuario = v_u and not usado;
+  if found and inv.vence_en <= now() and inv.codigo_hash = crypt(coalesce(p_codigo, ''), inv.codigo_hash) then return jsonb_build_object('vencido', true); end if;
+  if not found or inv.vence_en <= now() or inv.codigo_hash <> crypt(coalesce(p_codigo, ''), inv.codigo_hash) then
     insert into intentos_activacion (usuario) values (v_u);
     perform _evento('activacion_fallida', 'Usuario o codigo incorrecto (o codigo vencido)', 'aviso', v_u);
     if (select count(*) from intentos_activacion where usuario = v_u and creado > now() - interval '15 minutes') = 8 then
@@ -1034,7 +1063,7 @@ begin
   if mi_rol() is null then raise exception 'No autorizado.'; end if;
   p_nombres := trim(coalesce(p_nombres, ''));
   p_apellidos := trim(coalesce(p_apellidos, ''));
-  if p_nombres = '' or p_nombres ~ '[0-9|]' or p_apellidos ~ '[0-9|]' or length(p_nombres || p_apellidos) > 100 then
+  if p_nombres = '' or p_nombres ~ '[0-9|<>]' or p_apellidos ~ '[0-9|<>]' or length(p_nombres || p_apellidos) > 100 then
     raise exception 'Escribe tus nombres y apellidos (sin numeros).';
   end if;
   update perfiles set nombres = p_nombres, apellidos = p_apellidos where id = auth.uid();
@@ -1119,7 +1148,7 @@ begin
     end if;
   end if;
   v_usuario := _generar_usuario(p_nombres, p_apellidos, p_inst, p_ap1, p_ap2);
-  v_codigo := upper(substr(encode(gen_random_bytes(8), 'hex'), 1, 10));
+  v_codigo := upper(substr(encode(gen_random_bytes(10), 'hex'), 1, 14));
   if p_rol = 'alumno' then
     base := left(upper(v_usuario), 13);
     v_cod_est := base;
@@ -1131,7 +1160,7 @@ begin
     perform _autoinscribir_estudiante(v_est);   -- queda inscrito en los cursos de su carrera y ciclo
   end if;
   insert into invitaciones (institucion_id, rol, nombres, apellidos, usuario, codigo_hash, docente_id, estudiante_id, creado_por, correo)
-    values (p_inst, p_rol, trim(p_nombres), trim(p_apellidos), v_usuario, crypt(v_codigo, gen_salt('bf')), p_docente, v_est, p_creador, nullif(trim(coalesce(p_correo, '')), ''));
+    values (p_inst, p_rol, trim(p_nombres), trim(p_apellidos), v_usuario, crypt(v_codigo, gen_salt('bf', 10)), p_docente, v_est, p_creador, nullif(trim(coalesce(p_correo, '')), ''));
   select dominio, google_workspace into v_dom, v_gw from instituciones where id = p_inst;
   if v_dom is not null then v_ci := v_usuario || '@' || v_dom; end if;
   -- Cuenta real de Google Workspace: contrasena temporal aleatoria (Google pedira cambiarla al primer ingreso)
@@ -1157,7 +1186,7 @@ begin
   if r is null then raise exception 'No autorizado.'; end if;
   p_nombres := trim(coalesce(p_nombres, ''));
   p_apellidos := trim(coalesce(p_apellidos, ''));
-  if p_nombres = '' or p_nombres ~ '[0-9|]' or p_apellidos ~ '[0-9|]' or coalesce(p_ap1, '') ~ '[0-9|]' or coalesce(p_ap2, '') ~ '[0-9|]' or length(p_nombres || p_apellidos) > 100 then
+  if p_nombres = '' or p_nombres ~ '[0-9|<>]' or p_apellidos ~ '[0-9|<>]' or coalesce(p_ap1, '') ~ '[0-9|<>]' or coalesce(p_ap2, '') ~ '[0-9|<>]' or length(p_nombres || p_apellidos) > 100 then
     raise exception 'Nombres invalidos (sin numeros).';
   end if;
   p_correo := nullif(lower(trim(coalesce(p_correo, ''))), '');
@@ -1262,8 +1291,8 @@ begin
   select * into inv from invitaciones where id = p_id and not usado for update;
   if not found then raise exception 'Invitacion no encontrada.'; end if;
   if not _puede_invitacion(inv) then raise exception 'No autorizado.'; end if;
-  v_codigo := upper(substr(encode(gen_random_bytes(8), 'hex'), 1, 10));
-  update invitaciones set codigo_hash = crypt(v_codigo, gen_salt('bf')), vence_en = now() + interval '7 days' where id = p_id;
+  v_codigo := upper(substr(encode(gen_random_bytes(10), 'hex'), 1, 14));
+  update invitaciones set codigo_hash = crypt(v_codigo, gen_salt('bf', 10)), vence_en = now() + interval '7 days' where id = p_id;
   perform _evento('codigo_regenerado', 'Nuevo codigo para ' || inv.usuario, 'info');
   select dominio into v_dom from instituciones where id = inv.institucion_id;
   if v_dom is not null then v_ci := inv.usuario || '@' || v_dom; end if;
@@ -1496,7 +1525,7 @@ begin
   if not _alcance_perfil(p_perfil) then raise exception 'No autorizado.'; end if;
   perform _limitar('reset:' || auth.uid(), 30, 3600);
   if length(coalesce(p_nueva, '')) < 8 or length(p_nueva) > 72 or p_nueva !~ '[A-Za-z]' or p_nueva !~ '[0-9]' then raise exception 'La contrasena debe tener al menos 8 caracteres, con letras y numeros.'; end if;
-  update auth.users set encrypted_password = crypt(p_nueva, gen_salt('bf')), updated_at = now() where id = p_perfil;
+  update auth.users set encrypted_password = crypt(p_nueva, gen_salt('bf', 10)), updated_at = now() where id = p_perfil;
   perform _evento('contrasena_restablecida', 'Perfil ' || p_perfil, 'aviso');
   perform _notificar(p_perfil, 'restableció tu contraseña.');
 end $$;
@@ -1534,7 +1563,7 @@ begin
   if r = 'docente' and _por_curso(v_inst) then raise exception 'En esta institucion solo el administrador registra e inscribe alumnos.'; end if;
   p_codigo := trim(coalesce(p_codigo, '')); p_nombre := trim(coalesce(p_nombre, ''));
   if p_codigo !~ '^[A-Za-z0-9]{1,15}$' then raise exception 'Codigo invalido (solo letras y numeros, maximo 15).'; end if;
-  if p_nombre = '' or p_nombre ~ '[0-9|]' or length(p_nombre) > 100 then raise exception 'El nombre no puede estar vacio ni tener numeros (maximo 100 letras).'; end if;
+  if p_nombre = '' or p_nombre ~ '[0-9|<>]' or length(p_nombre) > 100 then raise exception 'El nombre no puede estar vacio ni tener numeros (maximo 100 letras).'; end if;
   v_doc := case when r = 'docente' then auth.uid() else p_docente end;
   if v_doc is not null and not exists (select 1 from perfiles where id = v_doc and rol = 'docente' and institucion_id = v_inst) then
     raise exception 'Docente invalido.';
@@ -1561,7 +1590,7 @@ begin
   if not permiso('editar_estudiantes') or not _puedo_gestionar(p_id) then raise exception 'No autorizado.'; end if;
   p_codigo := trim(coalesce(p_codigo, '')); p_nombre := trim(coalesce(p_nombre, ''));
   if p_codigo !~ '^[A-Za-z0-9]{1,15}$' then raise exception 'Codigo invalido (solo letras y numeros, maximo 15).'; end if;
-  if p_nombre = '' or p_nombre ~ '[0-9|]' or length(p_nombre) > 100 then raise exception 'El nombre no puede estar vacio ni tener numeros (maximo 100 letras).'; end if;
+  if p_nombre = '' or p_nombre ~ '[0-9|<>]' or length(p_nombre) > 100 then raise exception 'El nombre no puede estar vacio ni tener numeros (maximo 100 letras).'; end if;
   update estudiantes set codigo = p_codigo, nombre = p_nombre where id = p_id;
   perform _notificar_est(p_id, 'actualizó tus datos (código y nombre).');
 end $$;
@@ -1581,10 +1610,18 @@ end $$;
 
 create or replace function eliminar_estudiante(p_id bigint) returns void
 language plpgsql security definer set search_path = public as $$
+declare v_perfil uuid;
 begin
   if not permiso('eliminar') or not _puedo_gestionar(p_id) then raise exception 'No autorizado.'; end if;
   perform _evento('estudiante_eliminado', 'Estudiante ' || p_id, 'info');
+  if random() < 0.05 then delete from papelera where creado < now() - interval '60 days'; end if;
+  insert into papelera (institucion_id, tipo, datos, eliminado_por)
+    select e.institucion_id, 'estudiante', jsonb_build_object('estudiante', to_jsonb(e), 'usuario', (select usuario from perfiles where id = e.perfil_id),
+           'notas', (select coalesce(jsonb_agg(to_jsonb(n)), '[]'::jsonb) from notas n where n.estudiante_id = e.id)), auth.uid()
+    from estudiantes e where e.id = p_id;
+  select perfil_id into v_perfil from estudiantes where id = p_id;
   delete from estudiantes where id = p_id;
+  if v_perfil is not null then delete from auth.users where id = v_perfil; end if;   -- tambien se cierra su cuenta de acceso
 end $$;
 
 drop function if exists agregar_nota(bigint, int, numeric);
@@ -1602,7 +1639,7 @@ begin
     values (p_estudiante, p_curso, p_periodo, p_nota, coalesce(p_peso, 1), nullif(left(trim(coalesce(p_titulo, '')), 60), ''))
     returning id into v_id;
   perform _guardar_comentario(v_id, p_comentario);
-  perform _notificar_est(p_estudiante, 'te puso una nota de ' || p_nota || ' en «' || (select nombre from cursos where id = p_curso) || '» (' || (select nombre from periodos where id = p_periodo) || ').');
+  perform _notificar_est(p_estudiante, 'te puso una nota de ' || p_nota || ' en «' || (select nombre from cursos where id = p_curso) || '» (' || (select nombre from periodos where id = p_periodo) || ').', 'nota:' || p_curso);
 end $$;
 
 -- Al editar, titulo y comentario se reemplazan siempre (vacio = quitarlos); el peso solo cambia si se envia
@@ -1617,7 +1654,7 @@ begin
   if v_est is null or not permiso('editar_notas') or not _puedo_calificar(v_est, v_cur) then raise exception 'No autorizado.'; end if;
   update notas set nota = p_nota, peso = coalesce(p_peso, peso), titulo = nullif(left(trim(coalesce(p_titulo, '')), 60), '') where id = p_id;
   perform _guardar_comentario(p_id, p_comentario);
-  perform _notificar_est(v_est, 'cambió una de tus notas en «' || (select nombre from cursos where id = v_cur) || '»: ahora es ' || p_nota || '.');
+  perform _notificar_est(v_est, 'cambió una de tus notas en «' || (select nombre from cursos where id = v_cur) || '»: ahora es ' || p_nota || '.', 'nota:' || v_cur);
 end $$;
 
 create or replace function eliminar_nota(p_id bigint) returns void
@@ -1789,20 +1826,26 @@ end $$;
 -- ---------------------------------------------------------------------------
 -- Avisos: cada cosa que el administrador (o el dueno) hace con una persona le llega a ella
 -- ---------------------------------------------------------------------------
-create or replace function _notificar(p_perfil uuid, p_msg text) returns void language plpgsql security definer set search_path = public as $$
-declare v_quien text; v_inst bigint;
+drop function if exists _notificar(uuid, text);
+drop function if exists _notificar_est(bigint, text);
+create or replace function _notificar(p_perfil uuid, p_msg text, p_grupo text default null) returns void language plpgsql security definer set search_path = public as $$
+declare v_quien text; v_inst bigint; v_texto text; v_id bigint;
 begin
   if mi_rol() is null or p_perfil is null or p_perfil = auth.uid() then return; end if;
   select institucion_id into v_inst from perfiles where id = p_perfil;
   if not found then return; end if;
   select coalesce(nullif(trim(coalesce(nombres, '') || ' ' || coalesce(apellidos, '')), ''), 'La administración') into v_quien from perfiles where id = auth.uid();
-  insert into notificaciones (perfil_id, institucion_id, mensaje) values (p_perfil, v_inst, case mi_rol() when 'admin' then 'El administrador ' when 'dueno' then 'El dueño ' when 'alumno' then 'El alumno ' else 'El docente ' end || v_quien || ' ' || p_msg);
+  v_texto := case mi_rol() when 'admin' then 'El administrador ' when 'dueno' then 'El dueño ' when 'alumno' then 'El alumno ' else 'El docente ' end || v_quien || ' ' || p_msg;
+  if p_grupo is not null then   -- varios avisos parecidos y sin leer se juntan en uno: «… (y 3 más)»
+    select id into v_id from notificaciones where perfil_id = p_perfil and grupo = p_grupo and not leida and creado > now() - interval '30 minutes' order by id desc limit 1;
+    if found then update notificaciones set mensaje = v_texto || ' (y ' || veces || ' más)', veces = veces + 1, creado = now() where id = v_id; return; end if;
+  end if;
+  insert into notificaciones (perfil_id, institucion_id, mensaje, grupo) values (p_perfil, v_inst, v_texto, p_grupo);
 end $$;
-create or replace function _notificar_est(p_est bigint, p_msg text) returns void language plpgsql security definer set search_path = public as $$
+create or replace function _notificar_est(p_est bigint, p_msg text, p_grupo text default null) returns void language plpgsql security definer set search_path = public as $$
 begin
-  perform _notificar((select perfil_id from estudiantes where id = p_est), p_msg);
+  perform _notificar((select perfil_id from estudiantes where id = p_est), p_msg, p_grupo);
 end $$;
-
 -- Avisa a los alumnos de un curso (p_curso nulo: a los alumnos del aula del docente actual, en primaria)
 create or replace function _notificar_curso(p_curso bigint, p_msg text) returns void language plpgsql security definer set search_path = public as $$
 declare r record; v_inst bigint := mi_inst();
@@ -2070,6 +2113,9 @@ begin
   if p_contenido !~ '^[A-Za-z0-9+/=]+$' then raise exception 'Archivo invalido.'; end if;
   select institucion_id into v_inst from cursos where id = p_curso;
   if v_inst is null or v_inst is distinct from mi_inst() then raise exception 'Curso invalido.'; end if;
+  if (select coalesce(sum(tam), 0) from tarea_archivos where institucion_id = v_inst) + (length(p_contenido) * 3) / 4 > 157286400 then
+    raise exception 'El almacenamiento de archivos de tu institucion esta lleno (150 MB). Pide al administrador que borre archivos antiguos.';
+  end if;
   if p_tarea is not null then
     select * into t from tareas where id = p_tarea and curso_id = p_curso;
     if not found then raise exception 'Tarea no encontrada.'; end if;
@@ -2189,7 +2235,7 @@ begin
   if p_usuario !~ '^[a-z0-9]{3,30}$' then raise exception 'Usuario invalido (3-30 letras minusculas o numeros).'; end if;
   if length(coalesce(p_codigo, '')) < 8 then raise exception 'El codigo debe tener al menos 8 caracteres.'; end if;
   insert into invitaciones (institucion_id, rol, nombres, usuario, codigo_hash)
-    values (null, 'dueno', trim(p_nombres), p_usuario, crypt(p_codigo, gen_salt('bf')));
+    values (null, 'dueno', trim(p_nombres), p_usuario, crypt(p_codigo, gen_salt('bf', 10)));
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -2258,6 +2304,27 @@ begin
   end loop;
 end $$;
 
+-- Nombres sin < ni > (solo para lo que se guarde desde ahora)
+do $$
+declare x record;
+begin
+  for x in select * from (values ('estudiantes', 'nombre'), ('perfiles', 'nombres'), ('perfiles', 'apellidos')) as v(tabla, col) loop
+    if not exists (select 1 from pg_constraint where conname = 'seg_sinhtml_' || x.tabla || '_' || x.col) then
+      execute format('alter table public.%I add constraint %I check (%I !~ ''[<>]'') not valid', x.tabla, 'seg_sinhtml_' || x.tabla || '_' || x.col, x.col);
+    end if;
+  end loop;
+end $$;
+
+-- La API de datos de Supabase se hace menos visible: sin catalogo OpenAPI publico (nadie puede listar tablas y funciones desde internet),
+-- con un maximo de 1000 filas por respuesta y sin GraphQL (no se usa). Si tu plan no permite alguno de estos ajustes, se omite sin error.
+do $$
+begin
+  begin execute 'alter role authenticator set pgrst.openapi_mode = ''disabled'''; exception when others then null; end;
+  begin execute 'alter role authenticator set pgrst.db_max_rows = ''1000'''; exception when others then null; end;
+  begin execute 'notify pgrst, ''reload config'''; exception when others then null; end;
+  begin execute 'drop extension if exists pg_graphql'; exception when others then null; end;
+end $$;
+
 -- Colegios que ya existian: se les crean sus grados
 do $$ declare i record; begin
   for i in select id from instituciones loop perform _sembrar_grados(i.id); end loop;
@@ -2279,6 +2346,9 @@ end $$;
 revoke all on all tables in schema public from anon;
 revoke insert, update, delete, truncate, references, trigger on all tables in schema public from authenticated;
 revoke all on config, instituciones_correo from authenticated;
+-- El hash del codigo de activacion no se puede leer ni con sesion (se pueden leer las demas columnas)
+revoke select on invitaciones from authenticated;
+grant select (id, institucion_id, rol, nombres, apellidos, usuario, docente_id, estudiante_id, creado_por, usado, creado, correo, vence_en) on invitaciones to authenticated;
 alter default privileges in schema public revoke all on tables from anon;
 alter default privileges in schema public revoke insert, update, delete, truncate on tables from authenticated;
 revoke all on all sequences in schema public from anon, authenticated;

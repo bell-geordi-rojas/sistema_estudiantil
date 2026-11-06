@@ -567,6 +567,7 @@ async function activarCuenta(usuario, codigo, clave) {
   usuario = usuarioDe(usuario);
   cerrarSesionLocal();
   const info = await rpc("verificar_activacion", { p_usuario: usuario, p_codigo: codigo });
+  if (info && info.vencido) throw new Error("Tu código de activación venció (dura 7 días). Pide uno nuevo a tu institución.");
   if (!info) throw new Error("Usuario o código incorrecto, o la cuenta ya fue activada.");
   const j = await authPost("/auth/v1/signup", { email: emailDe(usuario), password: clave, data: { usuario, codigo } });
   if (j.access_token) fijarSesion(j); else await iniciarSesion(usuario, clave);
@@ -2417,7 +2418,7 @@ document.addEventListener("input", ev => {
     clearTimeout(tBusqueda); instSel = null;
     tBusqueda = setTimeout(async () => {
       const q = t.value.trim(); const cont = $("#resInst"); if (!cont) return;
-      if (q.length < 2) { cont.innerHTML = ""; return; }
+      if (q.length < 3) { cont.innerHTML = q.length ? `<small>Escribe al menos 3 letras para buscar.</small>` : ""; return; }
       try { const r = await rpc("buscar_instituciones", { p_q: q });
         cont.innerHTML = r.length ? r.map(i => `<button type="button" data-a="elegir-inst" data-id="${i.id}" data-nombre="${esc(i.nombre)}">${esc(i.nombre)}</button>`).join("") : `<small>No se encontró ninguna institución afiliada con ese nombre.</small>`;
       } catch (e) { cont.innerHTML = `<small class="err">${esc(e.message)}</small>`; }
