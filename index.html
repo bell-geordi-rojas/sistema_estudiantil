@@ -1370,7 +1370,7 @@ function vCuenta() {
     <div class="card"><h2>Apariencia</h2><p style="margin-top:0;color:var(--mute)">Efectos visuales: fundido entre pantallas, ventanas que crecen desde su tarjeta, desenfoque y zoom al pasar el cursor. Si te molestan o el equipo va lento, apágalos. También hay sonidos suaves al tocar botones y al terminar un proceso.</p>
     <div class="bar"><button class="btn ${efectosActivos() ? "sec" : ""}" data-a="efectos">${efectosActivos() ? "Desactivar efectos visuales" : "Activar efectos visuales"}</button>
     <button class="btn ${sonidosActivos() ? "sec" : ""}" data-a="sonidos">${sonidosActivos() ? "Desactivar sonidos" : "Activar sonidos"}</button>
-    ${sonidosActivos() ? `<button class="btn sec" data-a="probar-sonido">▶ Probar sonido</button><label style="display:flex;gap:6px;align-items:center;font-size:13px">Volumen <select id="volSon" aria-label="Volumen de los sonidos">${[["bajo", "Bajo"], ["medio", "Medio"], ["alto", "Alto"]].map(([v, n]) => `<option value="${v}" ${(localStorage.getItem("volumen") || "medio") === v ? "selected" : ""}>${n}</option>`).join("")}</select></label>` : ""}</div></div>
+    ${sonidosActivos() ? `<button class="btn sec" data-a="probar-sonido">▶ Probar sonido</button><label style="display:flex;gap:6px;align-items:center;font-size:13px">Volumen <select id="volSon" aria-label="Volumen de los sonidos">${VOLUMENES.map(([v, n]) => `<option value="${v}" ${nivelVolumen() === v ? "selected" : ""}>${n}</option>`).join("")}</select></label>` : ""}</div></div>
     <div class="card"><h2>Cambiar contraseña</h2><form class="form" id="fPass"><label>Nueva contraseña (mín. 8, con letras y números)<input type="password" name="a" minlength="8" required autocomplete="new-password"></label>${medidorHTML()}
     <label>Repite la contraseña<input type="password" name="b" minlength="8" required autocomplete="new-password"></label>
     <div class="err"></div><div><button class="btn">Cambiar contraseña</button></div></form></div>`;
@@ -1861,7 +1861,9 @@ const sonidosActivos = () => { try { return localStorage.getItem("sonidos") !== 
 let ctxAudio = null, ultimoSonido = 0;
 // [frecuencia Hz, inicio s, fin s, volumen, onda]: el timbre original (suave, senoidal) con el volumen alto
 const NOTAS_SONIDO = { tap: [[760, 0, .05, .85, "sine"]], abrir: [[520, 0, .06, .85, "sine"], [780, .05, .12, .85, "sine"]], ok: [[660, 0, .09, .85, "sine"], [990, .09, .2, .85, "sine"]], error: [[260, 0, .14, .85, "triangle"], [200, .12, .28, .85, "triangle"]] };   // volumen base (medio)
-const volumenSonido = () => { try { return { bajo: 0.45, medio: 1, alto: 1.6 }[localStorage.getItem("volumen")] || 1; } catch { return 1; } };
+const VOLUMENES = [["muybajo", "Muy bajo", 0.16], ["bajo", "Bajo", 0.25], ["medio", "Medio", 0.4], ["alto", "Alto", 0.63], ["maximo", "Máximo", 1]];   // pasos de unos 4 dB; «Medio» es el nivel por defecto
+const nivelVolumen = () => { try { const v = localStorage.getItem("volumen"); return VOLUMENES.some(x => x[0] === v) ? v : "medio"; } catch { return "medio"; } };
+const volumenSonido = () => VOLUMENES.find(x => x[0] === nivelVolumen())[2];
 function sonar(tipo = "tap") {
   if (!sonidosActivos()) return;
   try {
