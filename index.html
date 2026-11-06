@@ -194,25 +194,35 @@ html.vt-pagina main{view-transition-name:contenido}
 .legal ul{padding-left:20px}
 #avisoCookies{position:fixed;left:16px;right:16px;bottom:16px;max-width:620px;margin:0 auto;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;gap:14px;align-items:center;z-index:60;box-shadow:0 8px 28px rgba(0,0,0,.3)}
 #avisoCookies p{margin:0;font-size:13px;flex:1}
-#centroProcesos{position:fixed;right:16px;bottom:16px;width:min(380px,calc(100vw - 32px));background:var(--card);color:var(--ink);border:1px solid var(--line);border-top:3px solid var(--teal);border-radius:16px;box-shadow:var(--shadow-lg);padding:14px 16px;z-index:80;animation:pcIn .3s ease}
-@keyframes pcIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
-#centroProcesos.pc-error{border-top-color:var(--red)}#centroProcesos.pc-ok{border-top-color:var(--green)}
-#centroProcesos .pc-cab{display:flex;align-items:center;gap:12px}
-#centroProcesos .pc-ic{width:38px;height:38px;border-radius:10px;background:var(--teal);color:#fff;display:grid;place-items:center;font-weight:800;flex:none}
-#centroProcesos .pc-cab small{display:block;color:var(--mute);font-size:10px;letter-spacing:.8px;font-weight:600}
+#centroProcesos{position:fixed;top:68px;left:50%;transform:translateX(-50%);width:min(470px,calc(100vw - 24px));display:flex;gap:14px;align-items:center;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:26px;box-shadow:var(--shadow-lg);padding:14px 16px 14px 14px;z-index:80;animation:pcIn .35s cubic-bezier(.2,.8,.2,1)}
+@keyframes pcIn{from{opacity:0;transform:translate(-50%,-16px) scale(.96)}to{opacity:1;transform:translate(-50%,0)}}
+#centroProcesos .pc-ring{position:relative;width:52px;height:52px;flex:none}
+#centroProcesos .pc-ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+#centroProcesos .pc-ring circle{fill:none;stroke-width:4;stroke-linecap:round}
+#centroProcesos .pc-fondo{stroke:var(--line)}
+#centroProcesos .pc-arco{stroke:var(--teal);stroke-dasharray:119.4;stroke-dashoffset:119.4;transition:stroke-dashoffset .2s linear,stroke .3s}
+#centroProcesos .pc-pct{position:absolute;inset:0;display:grid;place-items:center;font-size:12px;font-weight:800;color:var(--teal)}
+#centroProcesos .pc-cuerpo{flex:1;min-width:0;display:grid;gap:3px}
 #centroProcesos .pc-tit{font-size:15px}
-#centroProcesos .pc-cab>div{flex:1;min-width:0}
-#centroProcesos .pc-pct{font-weight:700;font-size:18px;color:var(--teal)}
-#centroProcesos.pc-error .pc-pct{color:var(--red)}#centroProcesos.pc-ok .pc-pct{color:var(--green)}
-#centroProcesos .pc-barra{height:8px;border-radius:99px;background:var(--line);overflow:hidden;margin:12px 0 8px}
-#centroProcesos .pc-barra i{display:block;height:100%;width:0;background:var(--teal);border-radius:99px;transition:width .2s linear}
-#centroProcesos.pc-error .pc-barra i{background:var(--red)}#centroProcesos.pc-ok .pc-barra i{background:var(--green)}
-#centroProcesos .pc-fila,#centroProcesos .pc-pie{display:flex;justify-content:space-between;gap:10px;font-size:12px}
-#centroProcesos .pc-fila b{font-size:13px}
-#centroProcesos .pc-pie{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);color:var(--mute)}
-#centroProcesos .pc-punto{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--teal);margin-right:6px}
-#centroProcesos.pc-error .pc-punto{background:var(--red)}#centroProcesos.pc-ok .pc-punto{background:var(--green)}
-#centroProcesos .pc-x{border:0;background:none;color:var(--mute);cursor:pointer;font-size:16px;padding:0 2px}
+#centroProcesos .pc-msg{font-size:13px;color:var(--mute)}
+#centroProcesos .pc-pasos{list-style:none;margin:4px 0 0;padding:0;display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mute)}
+#centroProcesos .pc-pasos li{display:flex;align-items:center;gap:6px}
+#centroProcesos .pc-pasos i{width:10px;height:10px;border-radius:50%;border:2px solid var(--line);display:inline-block;transition:.25s}
+#centroProcesos .pc-pasos li.activo{color:var(--ink);font-weight:600}
+#centroProcesos .pc-pasos li.activo i{border-color:var(--teal);background:var(--teal);animation:pcLat 1s ease-in-out infinite}
+#centroProcesos .pc-pasos li.hecho i{border-color:var(--green);background:var(--green)}
+#centroProcesos .pc-pasos li.mal{color:var(--red);font-weight:600}#centroProcesos .pc-pasos li.mal i{border-color:var(--red);background:var(--red)}
+@keyframes pcLat{0%,100%{box-shadow:0 0 0 0 rgba(14,154,167,.5)}50%{box-shadow:0 0 0 5px rgba(14,154,167,0)}}
+#centroProcesos .pc-nivel{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px;color:var(--mute)}
+#centroProcesos .pc-seg{display:grid;grid-template-columns:repeat(4,1fr);gap:3px;width:80px}
+#centroProcesos .pc-seg i{height:5px;border-radius:99px;background:var(--line)}
+#centroProcesos .pc-seg i.n1{background:var(--red)}#centroProcesos .pc-seg i.n2{background:#f59e0b}#centroProcesos .pc-seg i.n3{background:#84cc16}#centroProcesos .pc-seg i.n4{background:var(--green)}
+#centroProcesos .pc-nivel b{color:var(--ink)}
+#centroProcesos .pc-nivel[hidden]{display:none}
+#centroProcesos.pc-ok .pc-arco{stroke:var(--green)}#centroProcesos.pc-ok .pc-pct{color:var(--green)}
+#centroProcesos.pc-error .pc-arco{stroke:var(--red)}#centroProcesos.pc-error .pc-pct{color:var(--red)}#centroProcesos.pc-error .pc-msg{color:var(--red)}
+#centroProcesos .pc-x{border:0;background:none;color:var(--mute);cursor:pointer;font-size:16px;padding:2px 4px;align-self:flex-start}
+@media(prefers-reduced-motion:reduce){#centroProcesos,#centroProcesos .pc-pasos li.activo i{animation:none}}
 .medidor{margin:-2px 0 12px;font-size:12px}
 .medidor .mbarra{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:6px}
 .medidor .mbarra i{height:6px;border-radius:99px;background:var(--line);transition:background .2s}
@@ -1804,25 +1814,29 @@ function actualizarMedidor(fm) {
   const co = m.querySelector("[data-coincide]"), b = fm.b ? fm.b.value : "";
   co.textContent = !b ? "" : fm.a.value === b ? "✔ Las contraseñas coinciden" : "✖ Las contraseñas no coinciden"; co.className = !b ? "" : fm.a.value === b ? "si" : "mal";
 }
-/* ===== Centro de procesos: una tarjeta que muestra el avance de una validación (acceso, activación, cambio de contraseña) ===== */
+/* ===== Centro de procesos: una pastilla con anillo de avance y pasos que muestra lo que está pasando (acceso, activación, cambio de contraseña) ===== */
 let procIntervalo = null, procCierre = null;
 function cerrarProceso() { clearInterval(procIntervalo); clearTimeout(procCierre); const e = document.getElementById("centroProcesos"); if (e) e.remove(); }
-function proceso(titulo, mensaje) {
+function proceso(titulo, pasos, mensaje) {
   cerrarProceso();
-  const el = document.createElement("div"); el.id = "centroProcesos"; el.setAttribute("role", "status"); el.setAttribute("aria-live", "polite");
-  el.innerHTML = `<div class="pc-cab"><span class="pc-ic">S</span><div><small>SINEVA · CENTRO DE PROCESOS</small><b class="pc-tit"></b></div><span class="pc-pct">0%</span><button type="button" class="pc-x" data-a="proceso-cerrar" aria-label="Cerrar">✕</button></div>
-    <div class="pc-barra"><i></i></div><div class="pc-fila"><b class="pc-msg"></b><span class="pc-tiempo">00:00</span></div>
-    <div class="pc-pie"><span><i class="pc-punto"></i><span class="pc-det"></span></span><span class="pc-n">1 proceso activo</span></div>`;
+  const n = pasos.length, el = document.createElement("div"); el.id = "centroProcesos"; el.setAttribute("role", "status"); el.setAttribute("aria-live", "polite");
+  el.innerHTML = `<div class="pc-ring"><svg viewBox="0 0 44 44" aria-hidden="true"><circle class="pc-fondo" cx="22" cy="22" r="19"/><circle class="pc-arco" cx="22" cy="22" r="19"/></svg><b class="pc-pct">0%</b></div>
+    <div class="pc-cuerpo"><b class="pc-tit"></b><span class="pc-msg"></span><ol class="pc-pasos">${pasos.map(() => `<li><i></i><span></span></li>`).join("")}</ol>
+    <div class="pc-nivel" hidden><span>Contraseña</span><div class="pc-seg"><i></i><i></i><i></i><i></i></div><b></b></div></div>
+    <button type="button" class="pc-x" data-a="proceso-cerrar" aria-label="Cerrar">✕</button>`;
   document.body.appendChild(el);
-  const q = s => el.querySelector(s), t0 = Date.now(); let pct = 0;
-  const pintar = () => { q(".pc-pct").textContent = Math.round(pct) + "%"; q(".pc-barra i").style.width = pct + "%"; };
-  q(".pc-tit").textContent = titulo; q(".pc-msg").textContent = mensaje || "Verificando…"; q(".pc-det").textContent = "En curso…";
-  procIntervalo = setInterval(() => { pct += (90 - pct) * 0.07; const s = Math.floor((Date.now() - t0) / 1000); q(".pc-tiempo").textContent = String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0"); pintar(); }, 120);
-  const fin = (clase, msg, det, ms) => { clearInterval(procIntervalo); el.className = "pc-" + clase; pct = clase === "ok" ? 100 : Math.max(pct, 90); q(".pc-msg").textContent = msg; q(".pc-det").textContent = det; q(".pc-n").textContent = clase === "ok" ? "Completado" : "Proceso detenido"; pintar(); procCierre = setTimeout(cerrarProceso, ms); };
+  const q = s => el.querySelector(s), lis = [...el.querySelectorAll(".pc-pasos li")], arco = q(".pc-arco"); let pct = 0, objetivo = 0, activo = 0;
+  lis.forEach((li, i) => { li.querySelector("span").textContent = pasos[i]; });
+  const pintar = () => { q(".pc-pct").textContent = Math.round(pct) + "%"; arco.style.strokeDashoffset = 119.4 * (1 - pct / 100); };
+  const marcar = i => { activo = i; lis.forEach((li, k) => { li.className = k < i ? "hecho" : k === i ? "activo" : ""; }); objetivo = Math.min(92, ((i + 0.8) / n) * 100); };
+  q(".pc-tit").textContent = titulo; q(".pc-msg").textContent = mensaje || ""; marcar(0);
+  procIntervalo = setInterval(() => { pct += (objetivo - pct) * 0.1; pintar(); }, 120);
+  const fin = (clase, msg, ms) => { clearInterval(procIntervalo); el.className = "pc-" + clase; q(".pc-msg").textContent = msg; if (clase === "ok") { pct = 100; lis.forEach(li => { li.className = "hecho"; }); q(".pc-pct").textContent = "✓"; } else { lis[activo].className = "mal"; q(".pc-pct").textContent = "!"; } arco.style.strokeDashoffset = 119.4 * (1 - pct / 100); procCierre = setTimeout(cerrarProceso, ms); };
   return {
-    paso(msg, minimo) { if (minimo) pct = Math.max(pct, minimo); q(".pc-msg").textContent = msg; pintar(); },
-    ok(det) { fin("ok", "Completado", det, 3200); },
-    error(det) { fin("error", "No se pudo completar", det, 8000); },
+    paso(i, msg) { marcar(i); if (msg) q(".pc-msg").textContent = msg; },
+    nivel(ev) { const b = q(".pc-nivel"); b.hidden = false; b.querySelectorAll(".pc-seg i").forEach((x, k) => { x.className = k < ev.nivel ? "n" + ev.nivel : ""; }); b.querySelector("b").textContent = ev.etiqueta; },
+    ok(msg) { fin("ok", msg, 3500); },
+    error(msg) { fin("error", msg, 8000); },
   };
 }
 /* ===== Avisos legales: el círculo «?» aparece cuando la persona acepta el aviso de cookies ===== */
@@ -2248,8 +2262,8 @@ const acciones = {
     const p = perfilDe(d.id), n = await pedir(`Nueva contraseña para ${nombreCompleto(p)} (mín. 8 caracteres, con letras y números):`); if (n === null) return;
     if (!claveValida(n)) { toast("La contraseña debe tener al menos 8 caracteres, con letras y números."); return; }
     const ev = evaluarClave(n, p.usuario); if (ev.debil) { toast("Esa contraseña es muy común o se parece al usuario. Elige otra."); return; }
-    const pr = proceso("Restableciendo contraseña", "Aplicando el cambio");
-    try { await rpc("restablecer_contrasena", { p_perfil: p.id, p_nueva: n }); pr.ok("Seguridad de la nueva contraseña: " + ev.etiqueta); } catch (e) { pr.error(e.message); throw e; }
+    const pr = proceso("Restableciendo contraseña", ["Seguridad", "Cambio", "Listo"], "Revisando qué tan segura es…"); pr.nivel(ev);
+    try { pr.paso(1, "Aplicando el cambio…"); await rpc("restablecer_contrasena", { p_perfil: p.id, p_nueva: n }); pr.ok("Listo. La nueva contraseña es " + ev.etiqueta.toLowerCase() + "."); } catch (e) { pr.error(e.message); throw e; }
     toast("Contraseña actualizada. Avísale a la persona.");
   },
   async rol(d) {
@@ -2446,15 +2460,15 @@ document.addEventListener("submit", ev => {
       await rpc("subir_archivo", { p_curso: Number(f.dataset.c), p_tarea: f.dataset.t ? Number(f.dataset.t) : null, p_tipo: f.dataset.tipo, p_nombre: file.name, p_mime: file.type || "", p_contenido: await leerBase64(file) });
       await recargarTareas(); repintarTareas(); toast(f.dataset.tipo === "entrega" ? "Tarea entregada." : "Documento subido.");
     } else if (f.id === "fLogin") {
-      const p = proceso("Validando acceso seguro", "Verificando credenciales");
-      try { await iniciarSesion(d.usuario, d.clave); p.paso("Cargando tu espacio…", 55); await entrar(); p.ok("Acceso verificado"); } catch (e) { p.error(e.message); throw e; }
+      const p = proceso("Validando tu acceso", ["Credenciales", "Sesión", "Listo"], "Revisando tus credenciales…");
+      try { await iniciarSesion(d.usuario, d.clave); p.paso(1, "Abriendo tu sesión…"); await entrar(); p.ok("¡Bienvenido! Tu acceso es seguro."); } catch (e) { p.error(e.message); throw e; }
       conTransicion(render); rpc("registrar_acceso").catch(() => {});
     } else if (f.id === "fActivar") {
       if (d.a !== d.b) falla("Las contraseñas no coinciden.");
       if (!claveValida(d.a)) falla("La contraseña debe tener al menos 8 caracteres, con letras y números.");
       const ev = evaluarClave(d.a, d.usuario); if (ev.debil) falla("Esa contraseña es muy común o se parece a tu usuario. Elige otra más segura.");
-      const p = proceso("Activando tu cuenta", "Verificando tu código");
-      try { await activarCuenta(d.usuario, d.codigo.trim(), d.a); p.paso("Cargando tu espacio…", 60); await entrar(); p.ok("Seguridad de tu contraseña: " + ev.etiqueta); } catch (e) { p.error(e.message); throw e; }
+      const p = proceso("Activando tu cuenta", ["Código", "Cuenta", "Listo"], "Comprobando tu código de activación…"); p.nivel(ev);
+      try { await activarCuenta(d.usuario, d.codigo.trim(), d.a); p.paso(1, "Preparando tu espacio…"); await entrar(); p.ok("Cuenta activada. Tu contraseña es " + ev.etiqueta.toLowerCase() + "."); } catch (e) { p.error(e.message); throw e; }
       render(); toast("¡Cuenta activada! Bienvenido.");
     } else if (f.id === "fAfil") {
       if (!instSel) falla("Busca y elige tu institución de la lista.");
@@ -2534,8 +2548,8 @@ document.addEventListener("submit", ev => {
       if (d.a !== d.b) falla("Las contraseñas no coinciden.");
       if (!claveValida(d.a)) falla("La contraseña debe tener al menos 8 caracteres, con letras y números.");
       const ev = evaluarClave(d.a, yo ? yo.usuario : ""); if (ev.debil) falla("Esa contraseña es muy común o se parece a tu usuario. Elige otra más segura.");
-      const p = proceso("Actualizando tu contraseña", "Aplicando el cambio");
-      try { await http("/auth/v1/user", { method: "PUT", body: { password: d.a } }); p.ok("Seguridad de tu contraseña: " + ev.etiqueta); } catch (e) { p.error(e.message); throw e; }
+      const p = proceso("Cambiando tu contraseña", ["Seguridad", "Cambio", "Listo"], "Revisando qué tan segura es…"); p.nivel(ev);
+      try { p.paso(1, "Aplicando el cambio…"); await http("/auth/v1/user", { method: "PUT", body: { password: d.a } }); p.ok("Listo. Tu contraseña es " + ev.etiqueta.toLowerCase() + "."); } catch (e) { p.error(e.message); throw e; }
       f.reset(); actualizarMedidor(f); toast("Contraseña cambiada.");
     }
   });
