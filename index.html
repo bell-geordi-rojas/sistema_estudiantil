@@ -41,6 +41,8 @@ header{background:var(--teal);color:#fff;min-height:56px;display:flex;align-item
 header .sp{flex:1}
 .user{display:flex;align-items:center;gap:10px;font-size:13px}
 .user small{display:block;opacity:.85;font-size:11px}
+.user.clic{cursor:pointer;border-radius:10px;padding:4px 10px 4px 6px;margin:-4px 0;transition:background .15s}
+.user.clic:hover,.user.clic:focus-visible{background:rgba(255,255,255,.18);outline:none}
 .hbtn{background:rgba(255,255,255,.18);color:#fff;border:0;border-radius:8px;padding:7px 12px;font:inherit;cursor:pointer}
 .hbtn:hover{background:rgba(255,255,255,.3)}
 .btn,.hbtn,nav button,.av,.ccard,.cstar{transition:transform .18s cubic-bezier(.2,.8,.2,1),background .15s,box-shadow .2s}
@@ -1395,7 +1397,7 @@ function cabecera(conUsuario, menu = "") {
   const sub = yo && yo.institucion ? yo.institucion.nombre : "Propietario";
   return `<header><div class="logo"><i></i>SINEVA</div><div class="sp"></div>
     <button class="hbtn" data-a="tema" title="Cambiar entre modo claro y oscuro">${temaActual() === "dark" ? "☀<span class=\"txt\"> Modo claro</span>" : "☾<span class=\"txt\"> Modo oscuro</span>"}</button>${conUsuario && yo && yo.acceso ? `<button class="hbtn" id="campana" data-a="campana" title="Avisos">🔔<span>${sinLeer() ? " " + sinLeer() : ""}</span></button>` : ""}${menu ? `<div class="menuwrap"><button class="hbtn menubtn" data-a="menu" aria-label="Menú" title="Menú">⋮</button><div class="menupop" id="menuPop">${menu}</div></div>` : ""}
-    ${conUsuario ? `<div class="user">${avatarDe(nombreCompleto(yo), yo.usuario, yo.id)}<div>${esc(nombreCompleto(yo))}<small>${ROL[yo.rol]} · ${esc(sub)}</small></div></div><button class="hbtn" data-a="salir">Salir</button>` : ""}</header>`;
+    ${conUsuario ? `<div class="user${yo.acceso ? " clic" : ""}" ${yo.acceso ? `data-v="cuenta" role="button" tabindex="0" title="Abrir Mi cuenta"` : ""}>${avatarDe(nombreCompleto(yo), yo.usuario, yo.id)}<div>${esc(nombreCompleto(yo))}<small>${ROL[yo.rol]} · ${esc(sub)}</small></div></div><button class="hbtn" data-a="salir">Salir</button>` : ""}</header>`;
 }
 function pantallaLogin() {
   const t = (id, txt) => `<button class="${tabLogin === id ? "on" : ""}" data-a="tab" data-id="${id}">${txt}</button>`;
@@ -1839,6 +1841,7 @@ function proceso(titulo, pasos, mensaje) {
     error(msg) { fin("error", msg, 8000); },
   };
 }
+document.addEventListener("keydown", ev => { if ((ev.key === "Enter" || ev.key === " ") && ev.target.matches && ev.target.matches(".user.clic")) { ev.preventDefault(); irA("cuenta"); } });   // la foto y el nombre del encabezado abren «Mi cuenta» también con el teclado
 /* ===== Desplegables: al abrir uno se cierra el que estaba abierto en el mismo grupo (avisos legales, periodos de un curso, docentes, directorio…) ===== */
 document.addEventListener("click", ev => {
   const s = ev.target.closest("details.acc > summary"); if (!s) return;
