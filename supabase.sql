@@ -877,6 +877,7 @@ create or replace function registrar_acceso() returns void
 language plpgsql volatile security definer set search_path = public as $$
 begin
   if mi_rol() is null then return; end if;
+  perform _cerrar_vencidas();
   if exists (select 1 from eventos_seguridad where tipo = 'login' and perfil_id = auth.uid() and creado > now() - interval '1 minute') then return; end if;
   -- IP que esa cuenta no habia usado en 60 dias (y la cuenta ya tenia accesos): se avisa; si es administrador, es alerta alta
   if exists (select 1 from eventos_seguridad where tipo = 'login' and perfil_id = auth.uid())
@@ -1914,9 +1915,11 @@ end $$;
 -- ---------------------------------------------------------------------------
 -- Tareas y archivos (docente: crea carpetas y sube material; alumno: entrega su trabajo)
 -- ---------------------------------------------------------------------------
-create or replace function crear_tarea(p_curso bigint, p_titulo text, p_descripcion text default '', p_limite timestamptz default null) returns bigint
+drop function if exists crear_tarea(bigint, text, text, timestamptz);
+create or replace function crear_tarea(p_curso bigint, p_titulo text, p_descripcion text default '', p_limite timestamptz default null,
+                                       p_periodo bigint default null, p_peso int default 1, p_cero_auto boolean default true) returns bigint
 language plpgsql security definer set search_path = public as $$
-declare v_inst bigint; v_id bigint;
+declare v_inst bigint; v_id bigint; v_per bigint;
 begin
   if mi_rol() not in ('admin', 'docente') then raise exception 'No autorizado.'; end if;
   select institucion_id into v_inst from cursos where id = p_curso;
@@ -1925,11 +1928,71 @@ begin
   if mi_rol() <> 'docente' then raise exception 'Solo los docentes crean tareas.'; end if;
   p_titulo := trim(coalesce(p_titulo, ''));
   if length(p_titulo) < 1 or length(p_titulo) > 120 then raise exception 'Escribe el titulo de la tarea (maximo 120 letras).'; end if;
-  insert into tareas (institucion_id, curso_id, docente_id, titulo, descripcion, limite)
-    values (v_inst, p_curso, auth.uid(), p_titulo, left(coalesce(p_descripcion, ''), 2000), p_limite) returning id into v_id;
+  if p_limite is not null and p_limite <= now() then raise exception 'La fecha limite debe ser futura.'; end if;
+  -- periodo donde se pondra la nota: el elegido; si no, el del ciclo del curso (universidad/instituto) o el ultimo periodo abierto (colegio)
+  v_per := p_periodo;
+  if v_per is null then
+    select p.id into v_per from periodos p join cursos c on c.id = p_curso
+      where p.institucion_id = v_inst and c.ciclo is not null and p.orden = c.ciclo limit 1;
+  end if;
+  if v_per is null then
+    select p.id into v_per from periodos p
+      left join periodos_activos a on a.periodo_id = p.id and ((_por_curso(v_inst) and a.curso_id = p_curso) or (not _por_curso(v_inst) and a.docente_id = auth.uid()))
+      where p.institucion_id = v_inst and (a.id is not null or p.orden = (select min(orden) from periodos where institucion_id = v_inst))
+      order by p.orden desc limit 1;
+  end if;
+  if v_per is null or not exists (select 1 from periodos where id = v_per and institucion_id = v_inst) then raise exception 'Periodo invalido.'; end if;
+  insert into tareas (institucion_id, curso_id, docente_id, titulo, descripcion, limite, periodo_id, peso, cero_auto)
+    values (v_inst, p_curso, auth.uid(), p_titulo, left(coalesce(p_descripcion, ''), 2000), p_limite, v_per,
+            least(greatest(coalesce(p_peso, 1), 1), 10), coalesce(p_cero_auto, true) and p_limite is not null) returning id into v_id;
   perform _notificar_curso(p_curso, 'publicó la tarea «' || p_titulo || '» en «' || (select nombre from cursos where id = p_curso) || '»'
     || case when p_limite is null then '.' else ', con fecha límite ' || to_char(p_limite at time zone 'America/Lima', 'DD/MM/YYYY HH24:MI') || '.' end);
   return v_id;
+end $$;
+
+-- Tareas vencidas: a quien no entrego nada se le pone nota 0 en el periodo de la tarea (una sola vez por tarea).
+-- Se ejecuta cada 10 minutos (si pg_cron esta disponible) y tambien cada vez que alguien entra o abre sus tareas.
+create or replace function _cerrar_vencidas() returns int language plpgsql security definer set search_path = public as $$
+declare t record; r record; n int := 0; v_total int;
+begin
+  for t in select * from tareas where not cerrada and limite is not null and limite < now() order by limite limit 200 loop
+    v_total := 0;
+    if t.cero_auto and t.periodo_id is not null then
+      for r in select e.id as est, e.perfil_id from estudiantes e
+               where e.institucion_id = t.institucion_id
+                 and (case when _por_curso(t.institucion_id)
+                           then exists (select 1 from inscripciones i where i.estudiante_id = e.id and i.curso_id = t.curso_id)
+                           else e.docente_id = t.docente_id end)
+                 and not exists (select 1 from tarea_archivos a where a.tarea_id = t.id and a.tipo = 'entrega' and a.estudiante_id = e.id)
+                 and not exists (select 1 from notas x where x.tarea_id = t.id and x.estudiante_id = e.id)
+      loop
+        begin
+          insert into notas (estudiante_id, curso_id, periodo_id, nota, peso, titulo, tarea_id)
+            values (r.est, t.curso_id, t.periodo_id, 0, t.peso, left('Tarea: ' || t.titulo, 60), t.id);
+          v_total := v_total + 1;
+          if r.perfil_id is not null then
+            insert into notificaciones (perfil_id, institucion_id, mensaje)
+              values (r.perfil_id, t.institucion_id, 'La tarea «' || t.titulo || '» venció sin entrega: se registró nota 0. Si fue un error, habla con tu docente.');
+          end if;
+        exception when others then null;   -- p. ej. ya tiene 20 notas en ese periodo: se omite a ese alumno
+        end;
+      end loop;
+    end if;
+    update tareas set cerrada = true where id = t.id;
+    n := n + 1;
+    if v_total > 0 then
+      insert into notificaciones (perfil_id, institucion_id, mensaje)
+        values (t.docente_id, t.institucion_id, 'La tarea «' || t.titulo || '» venció: ' || v_total || ' alumno(s) sin entrega recibieron nota 0.');
+    end if;
+  end loop;
+  return n;
+end $$;
+
+create or replace function cerrar_tareas_vencidas() returns int language plpgsql volatile security definer set search_path = public as $$
+begin
+  if mi_rol() is null then return 0; end if;
+  perform _limitar('cierre:' || auth.uid(), 12, 60);
+  return _cerrar_vencidas();
 end $$;
 
 create or replace function eliminar_tarea(p_id bigint) returns void
@@ -1965,6 +2028,9 @@ begin
     v_doc := coalesce(t.docente_id, auth.uid());
     insert into tarea_archivos (institucion_id, curso_id, tarea_id, tipo, docente_id, subido_por, nombre, mime, tam, contenido)
       values (v_inst, p_curso, p_tarea, 'material', v_doc, auth.uid(), left(p_nombre, 200), left(coalesce(p_mime, ''), 100), (length(p_contenido) * 3) / 4, p_contenido) returning id into v_id;
+    if p_tarea is null then
+      perform _notificar_curso(p_curso, 'subió material de apoyo «' || left(p_nombre, 80) || '» en «' || (select nombre from cursos where id = p_curso) || '».');
+    end if;
   elsif p_tipo = 'entrega' then
     if mi_rol() <> 'alumno' or p_tarea is null then raise exception 'No autorizado.'; end if;
     v_est := _mi_estudiante();
@@ -2103,6 +2169,22 @@ do $$ begin
   end if;
 end $$;
 
+-- Tareas: periodo y peso de la nota, "nota 0 si no entregan" y cierre. Las tareas que ya existian no ponen notas solas.
+alter table tareas add column if not exists periodo_id bigint references periodos (id) on delete set null;
+alter table tareas add column if not exists peso smallint not null default 1 check (peso between 1 and 10);
+alter table tareas add column if not exists cero_auto boolean not null default true;
+alter table tareas add column if not exists cerrada boolean not null default false;
+alter table notas add column if not exists tarea_id bigint references tareas (id) on delete set null;
+create index if not exists tareas_vencen on tareas (limite) where not cerrada and limite is not null;
+create index if not exists notas_tarea on notas (tarea_id) where tarea_id is not null;
+update tareas set cerrada = true, cero_auto = false where periodo_id is null and not cerrada;
+do $$
+begin
+  create extension if not exists pg_cron;
+  perform cron.schedule('sineva_cerrar_tareas', '*/10 * * * *', 'select public._cerrar_vencidas()');
+exception when others then null;   -- sin pg_cron igual se revisa cada vez que alguien entra o abre sus tareas
+end $$;
+
 -- Largos maximos en las tablas (se aplican a lo que se guarde desde ahora)
 do $$
 declare x record;
@@ -2160,7 +2242,7 @@ begin
              'cambiar_rol', 'eliminar_cuenta', 'regenerar_codigo', 'eliminar_invitacion', 'registrar_estudiante', 'actualizar_estudiante', 'reasignar_docente',
              'eliminar_estudiante', 'agregar_nota', 'actualizar_nota', 'eliminar_nota',
              'cambiar_tipo_institucion', 'eliminar_institucion', 'crear_invitaciones_masivo', 'actualizar_dominio', 'configurar_correo_institucion', 'quitar_correo_institucion', 'probar_correo', 'actualizar_cuentas_google',
-             'activar_periodo', 'registrar_acceso', 'registrar_denegado', 'ultimos_accesos', 'marcar_notificaciones_leidas', 'crear_grado', 'eliminar_grado', 'asignar_grado_estudiante', 'asignar_docente_grado', 'asignar_grado_curso', 'crear_anuncio', 'eliminar_anuncio', 'crear_tarea', 'eliminar_tarea', 'subir_archivo', 'eliminar_archivo', 'crear_carrera', 'editar_carrera', 'eliminar_carrera', 'asignar_curso_docente', 'inscribir_estudiantes', 'inscribir_ciclo', 'cambiar_carrera_estudiante', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
+             'activar_periodo', 'registrar_acceso', 'registrar_denegado', 'cerrar_tareas_vencidas', 'ultimos_accesos', 'marcar_notificaciones_leidas', 'crear_grado', 'eliminar_grado', 'asignar_grado_estudiante', 'asignar_docente_grado', 'asignar_grado_curso', 'crear_anuncio', 'eliminar_anuncio', 'crear_tarea', 'eliminar_tarea', 'subir_archivo', 'eliminar_archivo', 'crear_carrera', 'editar_carrera', 'eliminar_carrera', 'asignar_curso_docente', 'inscribir_estudiantes', 'inscribir_ciclo', 'cambiar_carrera_estudiante', 'poner_mantenimiento', 'crear_curso', 'renombrar_curso', 'eliminar_curso',
              'crear_periodo', 'renombrar_periodo', 'eliminar_periodo', 'actualizar_mi_perfil', 'actualizar_mi_foto'])
   loop
     execute format('revoke all on function %s from public, anon', f);
@@ -2170,7 +2252,7 @@ begin
   for f in select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname = any (array[
              '_generar_usuario', '_crear_invitacion', '_puede_resolver_solicitud', '_puede_invitacion', '_puedo_gestionar', '_alcance_perfil', 'crear_invitacion_dueno',
-             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario', '_enviar_credenciales', 'configurar_correo', '_sembrar_carreras', '_migrar_a_cursos', '_ciclos_defecto', '_puedo_calificar', '_autoinscribir_estudiante', '_autoinscribir_curso', '_notificar', '_notificar_est', '_notificar_curso', '_sembrar_grados', '_evento', '_limitar', '_t_borrado_masivo', '_t_notas_masivas'])
+             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario', '_enviar_credenciales', 'configurar_correo', '_sembrar_carreras', '_migrar_a_cursos', '_ciclos_defecto', '_puedo_calificar', '_autoinscribir_estudiante', '_autoinscribir_curso', '_notificar', '_notificar_est', '_notificar_curso', '_sembrar_grados', '_evento', '_limitar', '_t_borrado_masivo', '_t_notas_masivas', '_cerrar_vencidas'])
   loop
     execute format('revoke all on function %s from public, anon, authenticated', f);
   end loop;
