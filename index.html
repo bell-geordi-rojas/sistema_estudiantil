@@ -1821,20 +1821,28 @@ function filaTarea(t, conCurso) {
 function formTarea(cursoFijo) {
   const cs = cursosQueDicto(); if (!cs.length && !cursoFijo) return "";
   const L = "display:grid;gap:4px;margin-bottom:10px;font-size:13px;color:var(--mute)", inst = (cursoFijo || cs[0]).institucion_id;
-  const ps = periodosDe(inst), ACEPTA = ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt";
+  const ACEPTA = ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt";
   const opcion = (v, titulo, texto, marcado) => `<label style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:8px;cursor:pointer;color:var(--ink)"><input type="radio" name="tipo" value="${v}" ${marcado ? "checked" : ""} style="margin-top:3px"><span><b>${titulo}</b><small style="display:block">${texto}</small></span></label>`;
   return `<form id="fTarea" class="card" style="margin:0 0 14px"><h2 style="margin-top:0">Nueva carpeta</h2>
-    ${cursoFijo ? `<input type="hidden" name="curso" value="${cursoFijo.id}">` : `<label style="${L}">Curso<select name="curso" required>${cs.map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join("")}</select></label>`}
+    ${cursoFijo ? `<input type="hidden" name="curso" value="${cursoFijo.id}">` : `<label style="${L}"><span>Curso (los que tienes asignados)</span><select name="curso" required>${cs.map(c => `<option value="${c.id}">${esc(c.nombre)}${etiquetaCurso(c) ? " · " + esc(etiquetaCurso(c)) : ""}</option>`).join("")}</select></label>`}
     <div style="display:grid;gap:8px;margin-bottom:12px">${opcion("tarea", "Tarea", "Los alumnos entregan su trabajo y reciben nota.", true)}${opcion("info", "Documento de información", "Solo para leer o estudiar: no se entrega ni tiene nota.", false)}</div>
     <div data-solo="tarea"><label style="${L}">Título de la tarea<input name="titulo" maxlength="120" required placeholder="p. ej. Informe de la unidad 2"></label>
     <label style="${L}">Instrucciones (opcional)<textarea name="descripcion" rows="3" maxlength="2000"></textarea></label>
     <div class="row2"><label style="${L}">Fecha límite (opcional)<input type="datetime-local" name="limite"></label>
-    <label style="${L}">La nota va en el periodo<select name="periodo"><option value="">Automático (el del curso)</option>${ps.map(p => `<option value="${p.id}">${esc(p.nombre)}</option>`).join("")}</select></label></div>
+    <div id="campoPeriodo">${campoPeriodo(cursoFijo || cs[0])}</div></div>
     ${esUni() ? `<label style="${L}">Peso de la nota<select name="peso">${PESOS.map(p => `<option value="${p}">Peso ${p}</option>`).join("")}</select></label>` : ""}
     <label style="display:flex;gap:8px;align-items:center;margin-bottom:10px;font-size:13px"><input type="checkbox" name="cero" checked> Si no entregan a tiempo, poner nota 0 automáticamente (solo si hay fecha límite)</label>
     <p style="margin:0 0 10px;color:var(--mute);font-size:12px">Al vencer la fecha límite ya no se aceptan entregas, salvo que amplíes el plazo.</p></div>
-    <label style="${L}">Archivo (<span id="pistaArchivo">opcional: se sube junto con la tarea</span>)<input type="file" name="archivo" accept="${ACEPTA}"></label>
+    <label style="${L}"><span>Archivo (<span id="pistaArchivo">opcional: se sube junto con la tarea</span>)</span><input type="file" name="archivo" accept="${ACEPTA}"></label>
     <div class="err"></div><button class="btn">Crear carpeta</button></form>`;
+}
+// Donde va la nota de la tarea: en universidad/instituto, el ciclo del curso (fijo); en colegio, uno de los trimestres ya abiertos
+function campoPeriodo(c) {
+  if (!c) return "";
+  const L = "display:grid;gap:4px;margin-bottom:10px;font-size:13px;color:var(--mute)", ps = periodosDe(c.institucion_id), uni = (instDeId(c.institucion_id) || {}).tipo === "universidad";
+  if (uni && c.ciclo) { const p = ps.find(x => x.orden === c.ciclo); return `<div style="${L}"><span>La nota irá en</span><b style="color:var(--ink);font-size:14px">${esc(p ? p.nombre : "Ciclo " + c.ciclo)} <small>(el ciclo de este curso)</small></b><input type="hidden" name="periodo" value="${p ? p.id : ""}"></div>`; }
+  const car = c.carrera_id && carreraDe(c.carrera_id), abiertos = ps.filter(p => (!car || p.orden <= car.ciclos) && periodoAbierto(p, c));
+  return `<label style="${L}"><span>La nota va en el periodo</span><select name="periodo"><option value="">Automático (el último abierto)</option>${abiertos.map(p => `<option value="${p.id}">${esc(p.nombre)}</option>`).join("")}</select></label>`;
 }
 function formPlazo(t) {
   return `<form id="fPlazo" data-t="${t.id}" class="bar" style="margin:8px 0 12px;align-items:flex-end">
@@ -2265,6 +2273,7 @@ document.addEventListener("change", ev => {
     fm.titulo.required = !info; fm.archivo.required = info;
     $("#pistaArchivo").textContent = info ? "obligatorio" : "opcional: se sube junto con la tarea"; fm.querySelector("button.btn").textContent = info ? "Subir documento de información" : "Crear carpeta";
   }
+  else if (t.name === "curso" && t.closest("#fTarea")) { const cp = $("#campoPeriodo"); if (cp) cp.innerHTML = campoPeriodo(cursoDe(Number(t.value))); }   // el periodo depende del curso elegido
   else if (t.id === "instWs") { const dom = $("#instDom"); dom.required = t.value === "si"; if (t.value === "si") dom.focus(); }
   else if (t.id === "mInst" || t.id === "mRol") {
     masivo.texto = $("#masTexto").value; masivo.orden = $("#fMas").orden.value;
