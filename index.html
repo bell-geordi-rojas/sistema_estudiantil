@@ -1370,7 +1370,7 @@ function vCuenta() {
     <div class="card"><h2>Apariencia</h2><p style="margin-top:0;color:var(--mute)">Efectos visuales: fundido entre pantallas, ventanas que crecen desde su tarjeta, desenfoque y zoom al pasar el cursor. Si te molestan o el equipo va lento, apágalos. También hay sonidos suaves al tocar botones y al terminar un proceso.</p>
     <div class="bar"><button class="btn ${efectosActivos() ? "sec" : ""}" data-a="efectos">${efectosActivos() ? "Desactivar efectos visuales" : "Activar efectos visuales"}</button>
     <button class="btn ${sonidosActivos() ? "sec" : ""}" data-a="sonidos">${sonidosActivos() ? "Desactivar sonidos" : "Activar sonidos"}</button>
-    ${sonidosActivos() ? `<label style="display:flex;gap:6px;align-items:center;font-size:13px">Volumen <select id="volSon" aria-label="Volumen de los sonidos">${[["bajo", "Bajo"], ["medio", "Medio"], ["alto", "Alto"]].map(([v, n]) => `<option value="${v}" ${(localStorage.getItem("volumen") || "medio") === v ? "selected" : ""}>${n}</option>`).join("")}</select></label>` : ""}</div></div>
+    ${sonidosActivos() ? `<button class="btn sec" data-a="probar-sonido">▶ Probar sonido</button><label style="display:flex;gap:6px;align-items:center;font-size:13px">Volumen <select id="volSon" aria-label="Volumen de los sonidos">${[["bajo", "Bajo"], ["medio", "Medio"], ["alto", "Alto"]].map(([v, n]) => `<option value="${v}" ${(localStorage.getItem("volumen") || "medio") === v ? "selected" : ""}>${n}</option>`).join("")}</select></label>` : ""}</div></div>
     <div class="card"><h2>Cambiar contraseña</h2><form class="form" id="fPass"><label>Nueva contraseña (mín. 8, con letras y números)<input type="password" name="a" minlength="8" required autocomplete="new-password"></label>${medidorHTML()}
     <label>Repite la contraseña<input type="password" name="b" minlength="8" required autocomplete="new-password"></label>
     <div class="err"></div><div><button class="btn">Cambiar contraseña</button></div></form></div>`;
@@ -1859,19 +1859,27 @@ document.addEventListener("keydown", ev => { if ((ev.key === "Enter" || ev.key =
 /* ===== Sonidos suaves al tocar: se sintetizan con Web Audio (no hay archivos) y se apagan en «Mi cuenta» ===== */
 const sonidosActivos = () => { try { return localStorage.getItem("sonidos") !== "off"; } catch { return true; } };
 let ctxAudio = null, ultimoSonido = 0;
-const NOTAS_SONIDO = { tap: [[760, 0, .07, .17]], abrir: [[520, 0, .08, .17], [780, .06, .16, .17]], ok: [[660, 0, .11, .24], [990, .1, .26, .24]], error: [[260, 0, .17, .24], [200, .14, .34, .24]] };   // volumen base (medio)
-const volumenSonido = () => { try { return { bajo: 0.5, medio: 1, alto: 1.8 }[localStorage.getItem("volumen")] || 1; } catch { return 1; } };
+// [frecuencia Hz, inicio s, fin s, volumen]. Notas medias-agudas (los altavoces del celular y del portátil las reproducen mejor) y onda triangular (se oye más que una senoidal).
+const NOTAS_SONIDO = { tap: [[1100, 0, .09, .7, "square"]], abrir: [[700, 0, .1, .65, "square"], [1050, .06, .22, .65, "square"]], ok: [[784, 0, .14, .75, "triangle"], [1175, .12, .4, .75, "triangle"]], error: [[330, 0, .22, .75, "triangle"], [247, .17, .5, .75, "triangle"]] };   // volumen base (medio)
+const volumenSonido = () => { try { return { bajo: 0.45, medio: 1, alto: 1.6 }[localStorage.getItem("volumen")] || 1; } catch { return 1; } };
 function sonar(tipo = "tap") {
   if (!sonidosActivos()) return;
   try {
     const ahora = Date.now(); if (tipo === "tap" && ahora - ultimoSonido < 45) return; ultimoSonido = ahora;   // un clic compuesto (etiqueta + casilla) suena una sola vez
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
     ctxAudio = ctxAudio || new AC(); if (ctxAudio.state === "suspended") ctxAudio.resume();
+    if (!ctxAudio.maestro) {   // salida común con un compresor, para que suene fuerte sin saturar
+      const m = ctxAudio.createGain(); m.gain.value = 2.4;   // ganancia general alta; el limitador evita que sature
+      const fl = ctxAudio.createBiquadFilter ? ctxAudio.createBiquadFilter() : null, comp = ctxAudio.createDynamicsCompressor ? ctxAudio.createDynamicsCompressor() : null;
+      if (fl) { fl.type = "lowpass"; fl.frequency.value = 4500; }
+      if (comp) { comp.threshold.value = -10; comp.knee.value = 8; comp.ratio.value = 14; comp.attack.value = 0.002; comp.release.value = 0.12; }
+      let cola = ctxAudio.destination; if (comp) { comp.connect(cola); cola = comp; } if (fl) { fl.connect(cola); cola = fl; } m.connect(cola); ctxAudio.maestro = m;
+    }
     const t0 = ctxAudio.currentTime;
-    for (const [f, ini, fin, vol] of NOTAS_SONIDO[tipo] || []) {
-      const o = ctxAudio.createOscillator(), g = ctxAudio.createGain(); o.type = tipo === "error" ? "triangle" : "sine"; o.frequency.value = f;
-      g.gain.setValueAtTime(0.0001, t0 + ini); g.gain.exponentialRampToValueAtTime(Math.min(0.9, vol * volumenSonido()), t0 + ini + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t0 + fin);
-      o.connect(g).connect(ctxAudio.destination); o.start(t0 + ini); o.stop(t0 + fin + 0.02);
+    for (const [f, ini, fin, vol, onda] of NOTAS_SONIDO[tipo] || []) {
+      const o = ctxAudio.createOscillator(), g = ctxAudio.createGain(); o.type = onda || "triangle"; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0 + ini); g.gain.exponentialRampToValueAtTime(Math.min(1, vol * volumenSonido()), t0 + ini + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t0 + fin);
+      o.connect(g).connect(ctxAudio.maestro); o.start(t0 + ini); o.stop(t0 + fin + 0.02);
     }
   } catch {}
 }
@@ -2142,7 +2150,8 @@ const acciones = {
       const activa = $("#dlgBody .tabs button.on");
       if (dlg.open && activa && activa.dataset.id === "personas") $("#dlgBody").innerHTML = htmlCurso(c, "personas");
     } catch {}
-  },  sonidos() { const on = !sonidosActivos(); guardarLocal("sonidos", on ? "on" : "off"); render(); if (on) sonar("ok"); toast(on ? "Sonidos activados." : "Sonidos desactivados."); },
+  },  "probar-sonido"() { sonar("ok"); },
+  sonidos() { const on = !sonidosActivos(); guardarLocal("sonidos", on ? "on" : "off"); render(); if (on) sonar("ok"); toast(on ? "Sonidos activados." : "Sonidos desactivados."); },
   efectos() { const on = !efectosActivos(); document.documentElement.dataset.efectos = on ? "on" : "off"; guardarLocal("efectos", on ? "on" : "off"); render(); toast(on ? "Efectos visuales activados." : "Efectos visuales desactivados."); },
   async "correo-copiar-script"() { await copiar(SCRIPT_CORREO); },
   "correo-generar"() { const c = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789", b = crypto.getRandomValues(new Uint8Array(28)); $("#correoSecreto").value = [...b].map(x => c[x % c.length]).join(""); toast("Clave generada: cópiala en la propiedad SECRETO del script."); },
