@@ -2004,6 +2004,13 @@ begin
   p_titulo := trim(coalesce(p_titulo, ''));
   if length(p_titulo) < 1 or length(p_titulo) > 120 then raise exception 'Escribe el titulo del anuncio (maximo 120 letras).'; end if;
   insert into anuncios (institucion_id, autor, titulo, cuerpo, para) values (mi_inst(), auth.uid(), p_titulo, left(coalesce(p_cuerpo, ''), 2000), p_para) returning id into v_id;
+  -- Cada destinatario recibe ademas un aviso en la campana (antes solo se veia el anuncio en el panel, y quien ya tenia la sesion abierta no se enteraba)
+  insert into notificaciones (perfil_id, institucion_id, mensaje, grupo)
+    select p.id, p.institucion_id, left('Nuevo anuncio de la administración: «' || p_titulo || '»', 300), 'anuncio:' || v_id
+    from perfiles p
+    where p.institucion_id = mi_inst() and p.activo and p.id <> auth.uid()
+      and ((p_para = 'todos' and p.rol in ('docente', 'alumno')) or (p_para = 'docentes' and p.rol = 'docente') or (p_para = 'alumnos' and p.rol = 'alumno'))
+    limit 5000;
   return v_id;
 end $$;
 
@@ -2012,6 +2019,7 @@ begin
   perform _autorizar('anuncio', p_id);
   if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
   delete from anuncios where id = p_id and institucion_id = mi_inst();
+  delete from notificaciones where grupo = 'anuncio:' || p_id and institucion_id = mi_inst();   -- si se quita el anuncio, desaparece tambien su aviso
 end $$;
 
 -- ---------------------------------------------------------------------------
