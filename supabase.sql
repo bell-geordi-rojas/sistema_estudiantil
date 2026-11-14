@@ -229,6 +229,9 @@ create table if not exists anuncios (
 );
 create index if not exists anuncios_inst on anuncios (institucion_id, creado desc);
 alter table anuncios enable row level security;
+alter table anuncios alter column institucion_id drop not null;   -- sin institucion = anuncio general del dueño (lo ven todas las instituciones)
+alter table anuncios drop constraint if exists anuncios_para_check;
+alter table anuncios add constraint anuncios_para_check check (para in ('todos', 'admins', 'docentes', 'alumnos'));
 
 -- Registro de actividad: lo que importa para la seguridad (solo lo ve el dueño, en su panel «Seguridad»)
 create table if not exists eventos_seguridad (
@@ -782,9 +785,11 @@ create policy docente_grados_sel on docente_grados for select to authenticated u
   mi_rol() = 'dueno' or exists (select 1 from grados g where g.id = grado_id and g.institucion_id = mi_inst()));
 drop policy if exists anuncios_sel on anuncios;
 create policy anuncios_sel on anuncios for select to authenticated using (
-  mi_rol() = 'dueno'
-  or (institucion_id = mi_inst() and (para = 'todos' or mi_rol() = 'admin'
-       or (para = 'docentes' and mi_rol() = 'docente') or (para = 'alumnos' and mi_rol() = 'alumno'))));
+  (mi_rol() = 'dueno' and institucion_id is null)          -- el dueño solo ve SUS anuncios generales; los que publica cada admin en su institucion no los ve
+  or (mi_rol() in ('admin', 'docente', 'alumno')
+      and (institucion_id is null or institucion_id = mi_inst())   -- los generales (del dueño) y los de su propia institucion
+      and (mi_rol() = 'admin' or para = 'todos' or (para = 'docentes' and mi_rol() = 'docente') or (para = 'alumnos' and mi_rol() = 'alumno'))));
+
 drop policy if exists notificaciones_sel on notificaciones;
 create policy notificaciones_sel on notificaciones for select to authenticated using (perfil_id = auth.uid());
 
@@ -1996,32 +2001,123 @@ begin
 end $$;
 
 create or replace function crear_anuncio(p_titulo text, p_cuerpo text default '', p_para text default 'todos') returns bigint language plpgsql security definer set search_path = public as $$
-declare v_id bigint;
+declare v_id bigint; r text := mi_rol(); v_inst bigint := mi_inst();
 begin
-  if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
-  if p_para not in ('todos', 'docentes', 'alumnos') then raise exception 'Destinatarios invalidos.'; end if;
+  if r not in ('admin', 'dueno') then raise exception 'No autorizado.'; end if;
+  if p_para not in ('todos', 'docentes', 'alumnos') and not (r = 'dueno' and p_para = 'admins') then raise exception 'Destinatarios invalidos.'; end if;
   perform _limitar('anun:' || auth.uid(), 20, 3600);
   p_titulo := trim(coalesce(p_titulo, ''));
   if length(p_titulo) < 1 or length(p_titulo) > 120 then raise exception 'Escribe el titulo del anuncio (maximo 120 letras).'; end if;
-  insert into anuncios (institucion_id, autor, titulo, cuerpo, para) values (mi_inst(), auth.uid(), p_titulo, left(coalesce(p_cuerpo, ''), 2000), p_para) returning id into v_id;
-  -- Cada destinatario recibe ademas un aviso en la campana (antes solo se veia el anuncio en el panel, y quien ya tenia la sesion abierta no se enteraba)
+  insert into anuncios (institucion_id, autor, titulo, cuerpo, para) values (v_inst, auth.uid(), p_titulo, left(coalesce(p_cuerpo, ''), 2000), p_para) returning id into v_id;
+  -- Cada destinatario recibe ademas un aviso en la campana. Admin: gente de su institucion. Dueño: gente de todas las instituciones.
   insert into notificaciones (perfil_id, institucion_id, mensaje, grupo)
-    select p.id, p.institucion_id, left('Nuevo anuncio de la administración: «' || p_titulo || '»', 300), 'anuncio:' || v_id
+    select p.id, p.institucion_id,
+           left(case when r = 'dueno' then 'Nuevo anuncio general de SINEVA: «' else 'Nuevo anuncio de la administración: «' end || p_titulo || '»', 300), 'anuncio:' || v_id
     from perfiles p
-    where p.institucion_id = mi_inst() and p.activo and p.id <> auth.uid()
-      and ((p_para = 'todos' and p.rol in ('docente', 'alumno')) or (p_para = 'docentes' and p.rol = 'docente') or (p_para = 'alumnos' and p.rol = 'alumno'))
-    limit 5000;
+    where p.activo and p.id <> auth.uid() and p.rol <> 'dueno' and (r = 'dueno' or p.institucion_id = v_inst)
+      and ((p_para = 'todos' and (p.rol in ('docente', 'alumno') or (r = 'dueno' and p.rol = 'admin')))
+           or (p_para = 'admins' and p.rol = 'admin') or (p_para = 'docentes' and p.rol = 'docente') or (p_para = 'alumnos' and p.rol = 'alumno'))
+    limit 20000;
   return v_id;
 end $$;
 
 create or replace function eliminar_anuncio(p_id bigint) returns void language plpgsql security definer set search_path = public as $$
 begin
+  if mi_rol() not in ('admin', 'dueno') then raise exception 'No autorizado.'; end if;
   perform _autorizar('anuncio', p_id);
-  if mi_rol() is distinct from 'admin' then raise exception 'No autorizado.'; end if;
-  delete from anuncios where id = p_id and institucion_id = mi_inst();
-  delete from notificaciones where grupo = 'anuncio:' || p_id and institucion_id = mi_inst();   -- si se quita el anuncio, desaparece tambien su aviso
+  -- el admin solo quita los de su institucion; el dueño solo los generales (los de cada institucion no son suyos)
+  delete from anuncios where id = p_id and ((mi_rol() = 'dueno' and institucion_id is null) or (mi_rol() = 'admin' and institucion_id = mi_inst()));
+  if not found then raise exception 'No autorizado.'; end if;
+  delete from notificaciones where grupo = 'anuncio:' || p_id;   -- si se quita el anuncio, desaparece tambien su aviso
 end $$;
 
+-- ---------------------------------------------------------------------------
+-- Buzon de mensajes: admin <-> dueño, y alumno <-> docente (solo entre personas que se relacionan: el docente dicta al alumno).
+-- Los mensajes son privados: solo los ven quien los envia y quien los recibe (ni siquiera el administrador).
+-- ---------------------------------------------------------------------------
+create table if not exists mensajes (
+  id bigint generated always as identity primary key,
+  de uuid not null references perfiles (id) on delete cascade,
+  para uuid not null references perfiles (id) on delete cascade,
+  de_nombre text not null,
+  de_detalle text,
+  para_nombre text not null,
+  asunto text not null check (length(asunto) between 1 and 120),
+  cuerpo text not null check (length(cuerpo) between 1 and 2000),
+  creado timestamptz not null default now(),
+  leido boolean not null default false,
+  borrado_de boolean not null default false,
+  borrado_para boolean not null default false
+);
+create index if not exists mensajes_para on mensajes (para, creado desc);
+create index if not exists mensajes_de on mensajes (de, creado desc);
+alter table mensajes enable row level security;
+drop policy if exists mensajes_sel on mensajes;
+create policy mensajes_sel on mensajes for select to authenticated using (
+  mi_rol() is not null and ((de = auth.uid() and not borrado_de) or (para = auth.uid() and not borrado_para)));
+
+-- ¿El usuario actual puede escribirle a p_dest?
+create or replace function _puede_escribir(p_dest uuid) returns boolean language plpgsql stable security definer set search_path = public as $$
+declare r text := mi_rol(); d perfiles;
+begin
+  if r is null or p_dest is null or p_dest = auth.uid() then return false; end if;
+  select * into d from perfiles where id = p_dest and activo;
+  if not found then return false; end if;
+  return case r
+    when 'admin'   then d.rol = 'dueno'
+    when 'dueno'   then d.rol = 'admin'
+    when 'alumno'  then d.rol = 'docente' and d.institucion_id = mi_inst() and (d.id = mi_docente() or _docente_de_mis_cursos(d.id))
+    when 'docente' then d.rol = 'alumno' and d.institucion_id = mi_inst()
+                        and exists (select 1 from estudiantes e where e.perfil_id = d.id and (e.docente_id = auth.uid() or _docente_ve_est(e.id)))
+    else false end;
+end $$;
+
+-- A quien puede escribirle el usuario actual (para el selector del buzon)
+create or replace function mis_destinatarios() returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare r text := mi_rol(); v jsonb;
+begin
+  if r is null then return '[]'::jsonb; end if;
+  select coalesce(jsonb_agg(jsonb_build_object('id', x.id, 'nombre', x.nombre, 'detalle', x.detalle) order by x.nombre), '[]'::jsonb) into v from (
+    select p.id, trim(p.nombres || ' ' || p.apellidos) as nombre,
+           case p.rol when 'dueno' then 'Dueño de SINEVA' when 'admin' then 'Administrador · ' || coalesce((select nombre from instituciones where id = p.institucion_id), '') when 'docente' then 'Docente' else 'Alumno' end as detalle
+    from perfiles p where p.activo and p.id <> auth.uid() and _puede_escribir(p.id)
+      and (r in ('admin', 'dueno') or p.institucion_id = mi_inst())
+    limit 500) x;
+  return v;
+end $$;
+
+create or replace function enviar_mensaje(p_para uuid, p_asunto text, p_cuerpo text) returns bigint language plpgsql security definer set search_path = public as $$
+declare v_id bigint; yo perfiles; d perfiles; v_det text;
+begin
+  if mi_rol() is null then raise exception 'No autorizado.'; end if;
+  if not _puede_escribir(p_para) then raise exception 'No puedes enviarle mensajes a esa persona.'; end if;
+  perform _limitar('msg:' || auth.uid(), 30, 3600);
+  p_asunto := trim(coalesce(p_asunto, '')); p_cuerpo := trim(coalesce(p_cuerpo, ''));
+  if length(p_asunto) < 1 or length(p_asunto) > 120 then raise exception 'Escribe el asunto (maximo 120 letras).'; end if;
+  if length(p_cuerpo) < 1 or length(p_cuerpo) > 2000 then raise exception 'Escribe el mensaje (maximo 2000 letras).'; end if;
+  select * into yo from perfiles where id = auth.uid();
+  select * into d from perfiles where id = p_para;
+  v_det := case yo.rol when 'dueno' then 'Dueño de SINEVA' when 'admin' then 'Administrador · ' || coalesce((select nombre from instituciones where id = yo.institucion_id), '') when 'docente' then 'Docente' else 'Alumno' end;
+  if random() < 0.02 then delete from mensajes where creado < now() - interval '180 days'; end if;
+  insert into mensajes (de, para, de_nombre, de_detalle, para_nombre, asunto, cuerpo)
+    values (auth.uid(), p_para, trim(yo.nombres || ' ' || yo.apellidos), v_det, trim(d.nombres || ' ' || d.apellidos), p_asunto, p_cuerpo) returning id into v_id;
+  perform _notificar(p_para, 'te envió un mensaje: «' || left(p_asunto, 80) || '». Míralo en tu Buzón.', 'msg:' || auth.uid());
+  return v_id;
+end $$;
+
+create or replace function marcar_mensajes_leidos() returns void language sql security definer set search_path = public as $$
+  update mensajes set leido = true where para = auth.uid() and not leido and not borrado_para and mi_rol() is not null $$;
+
+-- Cada quien borra el mensaje de su lado; cuando los dos lo borraron, desaparece de verdad
+create or replace function eliminar_mensaje(p_id bigint) returns void language plpgsql security definer set search_path = public as $$
+declare m mensajes;
+begin
+  select * into m from mensajes where id = p_id and (de = auth.uid() or para = auth.uid());
+  if not found or mi_rol() is null then raise exception 'No autorizado.'; end if;
+  if m.de = auth.uid() then update mensajes set borrado_de = true where id = p_id; end if;
+  if m.para = auth.uid() then update mensajes set borrado_para = true where id = p_id; end if;
+  delete from mensajes where id = p_id and borrado_de and borrado_para;
+end $$;
 -- ---------------------------------------------------------------------------
 -- Tareas y archivos (docente: crea carpetas y sube material; alumno: entrega su trabajo)
 -- ---------------------------------------------------------------------------
@@ -2457,7 +2553,7 @@ begin
   for f in select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname = any (array[
              '_generar_usuario', '_crear_invitacion', '_puede_resolver_solicitud', '_puede_invitacion', '_puedo_gestionar', '_alcance_perfil', 'crear_invitacion_dueno',
-             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario', '_enviar_credenciales', 'configurar_correo', '_sembrar_carreras', '_migrar_a_cursos', '_ciclos_defecto', '_puedo_calificar', '_autoinscribir_estudiante', '_autoinscribir_curso', '_notificar', '_notificar_est', '_notificar_curso', '_sembrar_grados', '_evento', '_limitar', '_t_borrado_masivo', '_t_notas_masivas', '_cerrar_vencidas', '_alumnos_tarea', '_notificar_tarea', '_autorizar'])
+             '_sembrar_institucion', '_asegurar_ciclos', '_puede_cursos', '_guardar_comentario', '_enviar_credenciales', 'configurar_correo', '_sembrar_carreras', '_migrar_a_cursos', '_ciclos_defecto', '_puedo_calificar', '_autoinscribir_estudiante', '_autoinscribir_curso', '_notificar', '_notificar_est', '_notificar_curso', '_sembrar_grados', '_evento', '_limitar', '_t_borrado_masivo', '_t_notas_masivas', '_cerrar_vencidas', '_alumnos_tarea', '_notificar_tarea', '_autorizar', '_puede_escribir'])
   loop
     execute format('revoke all on function %s from public, anon, authenticated', f);
   end loop;

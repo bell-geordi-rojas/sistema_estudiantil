@@ -615,7 +615,8 @@ class Estudiante {
 
 /* ===== Estado ===== */
 let yo = null, permisos = {};
-let est = [], perfiles = [], insts = [], solic = [], invs = [], cursos = [], periodos = [], carreras = [], docCursos = [], inscr = [], activos = [], tareas = [], archivos = [], grados = [], docGrados = [], anuncios = [], notifs = [];
+let est = [], perfiles = [], insts = [], solic = [], invs = [], cursos = [], periodos = [], carreras = [], docCursos = [], inscr = [], activos = [], tareas = [], archivos = [], grados = [], docGrados = [], anuncios = [], notifs = [], mensajes = [], destinos = [];
+let buzonTab = "recibidos", borradorMsg = null;
 let inscrSet = new Set();   // "estudiante-curso" de cada inscripción, para consultarlas al instante
 let vista = "panel", orden = 0, filtro = "", detalleId = null, borrador = [], kBorr = 0, periodoSel = null;
 let tabLogin = "ingresar", instSel = null, avisoCarga = "", estadoSis = null;
@@ -717,18 +718,22 @@ const SEL_EVENTOS = "eventos_seguridad?select=id,tipo,gravedad,usuario,rol,insti
 let eventos = [], accesos = [];
 const altas24 = () => eventos.filter(e => e.gravedad === "alta" && Date.now() - new Date(e.creado) < 864e5).length;
 const SEL_ANUNCIOS = "anuncios?select=id,institucion_id,titulo,cuerpo,para,creado&order=creado.desc&limit=30";
+const SEL_MENSAJES = "mensajes?select=id,de,para,de_nombre,de_detalle,para_nombre,asunto,cuerpo,creado,leido&order=creado.desc&limit=100";
+const sinLeerMsg = () => yo ? mensajes.filter(m => m.para === yo.id && !m.leido).length : 0;
 const SEL_NOTIFS = "notificaciones?select=id,mensaje,leida,creado&order=creado.desc&limit=50";
 async function recargarExtra() {
   const q = p => sel(p).catch(() => []);
-  const [g, dg, an, no, ev] = await Promise.all([q("grados?select=id,institucion_id,nombre,orden&order=orden,id"), q("docente_grados?select=docente_id,grado_id"),
-    q(SEL_ANUNCIOS), q(SEL_NOTIFS), yo && yo.rol === "dueno" ? q(SEL_EVENTOS) : Promise.resolve([])]);
-  grados = g; docGrados = dg; anuncios = an; notifs = no; eventos = ev; pintarCampana();
+  const [g, dg, an, no, ev, ms] = await Promise.all([q("grados?select=id,institucion_id,nombre,orden&order=orden,id"), q("docente_grados?select=docente_id,grado_id"),
+    q(SEL_ANUNCIOS), q(SEL_NOTIFS), yo && yo.rol === "dueno" ? q(SEL_EVENTOS) : Promise.resolve([]), q(SEL_MENSAJES)]);
+  grados = g; docGrados = dg; anuncios = an; notifs = no; eventos = ev; mensajes = ms; pintarCampana();
   // Cada minuto se buscan avisos y anuncios nuevos (quien ya tiene la sesión abierta también los recibe)
   if (!tNotif) tNotif = setInterval(() => { if (!yo) return;
-    Promise.all([sel(SEL_NOTIFS), sel(SEL_ANUNCIOS)]).then(([r, a]) => {
+    Promise.all([sel(SEL_NOTIFS), sel(SEL_ANUNCIOS), sel(SEL_MENSAJES)]).then(([r, a, m]) => {
       const nuevo = a.length !== anuncios.length || (a[0] && anuncios[0] && a[0].id !== anuncios[0].id);
-      notifs = r; anuncios = a; pintarCampana();
-      if (nuevo && ["panel", "anuncios"].includes(vista) && !dlg.open) render();
+      const msgNuevo = m.length !== mensajes.length || (m[0] && mensajes[0] && m[0].id !== mensajes[0].id);
+      notifs = r; anuncios = a; mensajes = m; pintarCampana();
+      if (((nuevo && ["panel", "anuncios"].includes(vista)) || (msgNuevo && vista === "buzon")) && !dlg.open && !document.activeElement.closest("form")) render();
+      else if (msgNuevo) { const b = $("#main") && document.querySelector("nav button[data-v=buzon]"); if (b) { b.querySelector(".badge")?.remove(); if (sinLeerMsg()) b.insertAdjacentHTML("beforeend", `<span class="badge">${sinLeerMsg()}</span>`); } }
     }).catch(() => {}); }, 60000);
 }
 let tNotif = null;
@@ -910,7 +915,8 @@ function vistasDisponibles() {
   if (r !== "dueno") v.push(["cursos", "❖", r === "alumno" ? "Mis cursos" : "Cursos"]);
   if (r === "admin" && esUni()) v.push(["carreras", "◈", "Carreras"]);
   if (r === "admin" && !esUni()) v.push(["grados", "◈", "Grados"]);
-  if (r === "admin" || r === "docente" || r === "alumno") v.push(["anuncios", "⚑", "Anuncios"]);
+  v.push(["anuncios", "⚑", "Anuncios"]);
+  v.push(["buzon", "✉", "Buzón de mensajes"]);
   if (r === "admin" && porCurso()) { v.push(["asignaciones", "☰", "Docentes y cursos"]); v.push(["inscripciones", "✓", "Inscripciones"]); }
   if (r === "alumno") { v.push(["mis", "★", "Mis notas"]); v.push(["tareas", "✐", "Tareas"]); v.push(["comentarios", "✎", "Mis comentarios"]); }
   else if (r === "dueno") v.push(["directorio", "☰", "Directorio"]);   // el dueño ve a todos, por institución / carrera / ciclo / curso (o grado)
@@ -920,7 +926,7 @@ function vistasDisponibles() {
   if (r === "admin" || r === "dueno") v.push(["buscar", "⌕", "Buscar estudiante"]);
   if (r === "dueno" || p.ver_estadisticas) v.push(["estadisticas", "◔", "Estadísticas"]);
   if (puedeCursos()) v.push(["config", "▣", tituloConfig()]);
-  if (r === "admin") v.push(["correo", "✉", "Correo institucional"]);
+  if (r === "admin") v.push(["correo", "@", "Correo institucional"]);
   if (puedeGestionar() && !(r === "docente" && porCurso())) { v.push(["usuarios", "☺", "Cuentas y permisos"]); v.push(["solicitudes", "☑", "Solicitudes de afiliación"]); v.push(["invitar", "＋", tituloRegistro()]); }
   if (r === "dueno") { v.push(["instituciones", "⌂", "Instituciones"]); v.push(["carpetas", "▤", "Carpetas"]); v.push(["seguridad", "⛨", "Seguridad"]); }
   v.push(["cuenta", "⚙", "Mi cuenta"]);
@@ -1490,12 +1496,12 @@ function pantallaApp() {
   }
   const actual = items.find(it => it.m.includes(vista));
   const pestanas = actual && actual.m.length > 1 ? `<div class="tabs" style="flex-wrap:wrap;max-width:760px">${actual.m.map(k => `<button class="${k === vista ? "on" : ""}" data-v="${k}">${dispo.get(k)[2]}${k === "solicitudes" && solic.length ? ` <span class="badge" style="display:inline-block;background:var(--red);color:#fff;border-radius:10px;padding:0 7px;font-size:11px">${solic.length}</span>` : ""}</button>`).join("")}</div>` : "";
-  const nav = items.map(it => `<button class="${it.m.includes(vista) ? "on" : ""}" data-v="${it.k}"><span>${it.i}</span>${it.n}${it.m.includes("solicitudes") && solic.length ? `<span class="badge">${solic.length}</span>` : ""}${it.m.includes("seguridad") && altas24() ? `<span class="badge">${altas24()}</span>` : ""}</button>`).join("") +
+  const nav = items.map(it => `<button class="${it.m.includes(vista) ? "on" : ""}" data-v="${it.k}"><span>${it.i}</span>${it.n}${it.m.includes("solicitudes") && solic.length ? `<span class="badge">${solic.length}</span>` : ""}${it.m.includes("buzon") && sinLeerMsg() ? `<span class="badge">${sinLeerMsg()}</span>` : ""}${it.m.includes("seguridad") && altas24() ? `<span class="badge">${altas24()}</span>` : ""}</button>`).join("") +
     (esStaff() && (permisos.exportar || permisos.registrar_estudiantes) ? `<hr class="sep">${permisos.exportar ? `<button data-a="export"><span>⇩</span>Exportar .csv</button>` : ""}${permisos.registrar_estudiantes ? `<button data-a="import"><span>⇧</span>Importar .csv</button>` : ""}` : "");
   let cuerpo;
   if (avisoCarga) cuerpo = `<div class="card"><h2>No se pudieron cargar los datos</h2><p class="err">${esc(avisoCarga)}</p><button class="btn" data-a="reintentar">Reintentar</button></div>`;
   else cuerpo = { panel: vPanel, mis: vMis, lista: vLista, registrar: vRegistrar, calificar: vCalificar, buscar: vBuscar, estadisticas: vEstadisticas,
-    usuarios: vUsuarios, solicitudes: vSolicitudes, invitar: vInvitar, instituciones: vInstituciones, carpetas: vCarpetas, tareas: vTareas, cuenta: vCuenta, config: vConfig, comentarios: vComentarios, grados: vGrados, anuncios: vAnuncios, directorio: vDirectorio, seguridad: vSeguridad, descargar: vDescargar, cursos: vCursos, correo: vCorreo, asignaciones: vAsignaciones, inscripciones: vInscripciones, carreras: vCarreras }[vista]();
+    usuarios: vUsuarios, solicitudes: vSolicitudes, invitar: vInvitar, instituciones: vInstituciones, carpetas: vCarpetas, tareas: vTareas, cuenta: vCuenta, config: vConfig, comentarios: vComentarios, grados: vGrados, anuncios: vAnuncios, buzon: vBuzon, directorio: vDirectorio, seguridad: vSeguridad, descargar: vDescargar, cursos: vCursos, correo: vCorreo, asignaciones: vAsignaciones, inscripciones: vInscripciones, carreras: vCarreras }[vista]();
   if (!avisoCarga && vista === "panel") cuerpo = tarjetaAnuncios() + cuerpo;
   const aviso = yo.rol === "dueno" && yo.mantenimiento ? `<div class="msg warn" style="border-radius:0;text-align:center">⚠ El sistema está en mantenimiento: solo tú puedes usarlo. Reanúdalo en «Instituciones».</div>` : "";
   return `${cabecera(true, nav)}${aviso}<div class="layout"><nav>${nav}</nav><main>${pestanas}<div id="main">${cuerpo}</div></main></div>`;
@@ -1507,6 +1513,7 @@ function render() {
 function irA(v) {
   if (v === "registrar") borrador = []; vista = v; conTransicion(render);
   if (v === "seguridad") Promise.all([recargarExtra(), rpc("ultimos_accesos").then(r => { accesos = r || []; }).catch(() => {})]).then(() => { if (vista === v && !dlg.open) render(); }).catch(() => {});
+  if (v === "buzon") Promise.all([recargarExtra(), rpc("mis_destinatarios").then(r => { destinos = r || []; }).catch(() => {})]).then(() => { if (vista === v && !dlg.open) { render(); marcarBuzonLeido(); } }).catch(() => {});
   if (["grados", "anuncios", "directorio", "panel"].includes(v)) recargarExtra().then(() => { if (vista === v && !dlg.open) render(); }).catch(() => {});
   if (v === "tareas") recargarTareas().then(() => { if (vista === "tareas") repintarTareas(); }).catch(() => {});   // datos frescos al abrir
 }
@@ -1737,18 +1744,52 @@ function tabDocentesGra(g) {
       <div class="chips">${mine.map(x => `<label class="chk"><input type="checkbox" data-asig="${d.id}|${x.id}" ${docCursos.some(a => a.docente_id === d.id && a.curso_id === x.id) ? "checked" : ""}>${esc(x.nombre)}</label>`).join("")}</div></div></details>`).join("")}</div>`;
 }
 /* ===== Anuncios generales (los publica el administrador; los ven todos en su panel) ===== */
-const PARA = { todos: "Todos", docentes: "Docentes", alumnos: "Alumnos" };
+const PARA = { todos: "Todos", admins: "Administradores", docentes: "Docentes", alumnos: "Alumnos" };
+const esGeneral = a => !a.institucion_id;   // anuncio del dueño: llega a todas las instituciones
+const etiquetaAnuncio = a => esGeneral(a) ? `<span class="pill" style="min-width:0;background:var(--violet-ink);padding:1px 8px;font-size:11px">General de SINEVA</span>` : "";
 function tarjetaAnuncios() {
   const l = anuncios.slice(0, 4); if (!l.length) return "";
-  return `<div class="card"><h2>Anuncios <small>${anuncios.length}</small>${yo.rol === "docente" || yo.rol === "alumno" ? ` <button class="btn sec sm" data-v="anuncios" style="margin-left:auto">Ver todos</button>` : ""}</h2>${l.map(a => `<div style="padding:8px 0;border-top:1px solid var(--row)"><b>${esc(a.titulo)}</b> <small>${fechaHora(a.creado)}${yo.rol === "admin" || yo.rol === "dueno" ? " · " + PARA[a.para] + (yo.rol === "dueno" && instDe(a.institucion_id) ? " · " + esc(instDe(a.institucion_id).nombre) : "") : ""}</small>${a.cuerpo ? `<div style="white-space:pre-wrap;margin-top:2px">${esc(a.cuerpo)}</div>` : ""}</div>`).join("")}</div>`;
+  const gest = yo.rol === "admin" || yo.rol === "dueno";
+  return `<div class="card"><h2>Anuncios <small>${anuncios.length}</small>${!gest ? ` <button class="btn sec sm" data-v="anuncios" style="margin-left:auto">Ver todos</button>` : ""}</h2>${l.map(a => `<div style="padding:8px 0;border-top:1px solid var(--row)"><b>${esc(a.titulo)}</b> ${etiquetaAnuncio(a)} <small>${fechaHora(a.creado)}${gest ? " · para " + PARA[a.para].toLowerCase() : ""}</small>${a.cuerpo ? `<div style="white-space:pre-wrap;margin-top:2px">${esc(a.cuerpo)}</div>` : ""}</div>`).join("")}</div>`;
 }
 function vAnuncios() {
-  if (yo.rol !== "admin") return `<div class="card"><h2>Anuncios de la administración <small>${anuncios.length}</small></h2>${anuncios.map(a => `<div style="padding:10px 0;border-top:1px solid var(--row)"><b>${esc(a.titulo)}</b> <small>${fechaHora(a.creado)}</small>${a.cuerpo ? `<div style="white-space:pre-wrap;margin-top:2px">${esc(a.cuerpo)}</div>` : ""}</div>`).join("") || `<div class="empty">Por ahora no hay anuncios. Cuando la administración publique uno, te llegará un aviso en la campana 🔔.</div>`}</div>`;
-  return `<div class="card"><h2>Nuevo anuncio general</h2><form class="form" id="fAnuncio" style="max-width:640px"><label>Título<input name="titulo" maxlength="120" required></label>
+  const dueno = yo.rol === "dueno";
+  if (yo.rol !== "admin" && !dueno) return `<div class="card"><h2>Anuncios <small>${anuncios.length}</small></h2>${anuncios.map(a => `<div style="padding:10px 0;border-top:1px solid var(--row)"><b>${esc(a.titulo)}</b> ${etiquetaAnuncio(a)} <small>${fechaHora(a.creado)}</small>${a.cuerpo ? `<div style="white-space:pre-wrap;margin-top:2px">${esc(a.cuerpo)}</div>` : ""}</div>`).join("") || `<div class="empty">Por ahora no hay anuncios. Cuando la administración publique uno, te llegará un aviso en la campana 🔔.</div>`}</div>`;
+  const opciones = dueno
+    ? `<option value="todos">Todos (administradores, docentes y alumnos de todas las instituciones)</option><option value="admins">Solo administradores</option><option value="docentes">Solo docentes</option><option value="alumnos">Solo alumnos</option>`
+    : `<option value="todos">Todos (docentes y alumnos)</option><option value="docentes">Solo docentes</option><option value="alumnos">Solo alumnos</option>`;
+  const nota = dueno ? `Llega a <b>todas</b> las instituciones. Los anuncios que publica cada administrador son privados de su institución: tú no los ves.`
+    : `Solo lo verán los docentes y alumnos de <b>tu institución</b>. Los anuncios generales de SINEVA aparecen aparte, marcados como «General».`;
+  return `<div class="card"><h2>${dueno ? "Nuevo anuncio general" : "Nuevo anuncio de tu institución"}</h2><p style="color:var(--mute);margin:0 0 10px">${nota}</p><form class="form" id="fAnuncio" style="max-width:640px"><label>Título<input name="titulo" maxlength="120" required></label>
     <label>Mensaje (opcional)<textarea name="cuerpo" rows="3" maxlength="2000"></textarea></label>
-    <label>Para<select name="para"><option value="todos">Todos (docentes y alumnos)</option><option value="docentes">Solo docentes</option><option value="alumnos">Solo alumnos</option></select></label>
+    <label>Para<select name="para">${opciones}</select></label>
     <div class="err"></div><button class="btn">Publicar anuncio</button></form></div>
-    <div class="card"><h2>Publicados <small>${anuncios.length}</small></h2>${anuncios.map(a => `<div style="padding:10px 0;border-top:1px solid var(--row);display:flex;gap:10px;justify-content:space-between;align-items:flex-start"><div><b>${esc(a.titulo)}</b> <small>${fechaHora(a.creado)} · ${PARA[a.para]}</small>${a.cuerpo ? `<div style="white-space:pre-wrap">${esc(a.cuerpo)}</div>` : ""}</div><button class="btn del" data-a="anuncio-del" data-id="${a.id}">Quitar</button></div>`).join("") || `<div class="empty">Aún no hay anuncios.</div>`}</div>`;
+    <div class="card"><h2>${dueno ? "Tus anuncios generales" : "Anuncios que verán tus docentes y alumnos"} <small>${anuncios.length}</small></h2>${anuncios.map(a => `<div style="padding:10px 0;border-top:1px solid var(--row);display:flex;gap:10px;justify-content:space-between;align-items:flex-start"><div><b>${esc(a.titulo)}</b> ${etiquetaAnuncio(a)} <small>${fechaHora(a.creado)} · para ${PARA[a.para].toLowerCase()}</small>${a.cuerpo ? `<div style="white-space:pre-wrap">${esc(a.cuerpo)}</div>` : ""}</div>${dueno || !esGeneral(a) ? `<button class="btn del" data-a="anuncio-del" data-id="${a.id}">Quitar</button>` : ""}</div>`).join("") || `<div class="empty">Aún no hay anuncios.</div>`}</div>`;
+}
+/* ===== Buzón de mensajes: admin ↔ dueño y alumno ↔ docente (privados: solo los ven quien los envía y quien los recibe) ===== */
+function marcarBuzonLeido() {
+  if (!sinLeerMsg()) return;
+  rpc("marcar_mensajes_leidos").then(() => { mensajes.forEach(m => { if (m.para === yo.id) m.leido = true; }); const b = document.querySelector("nav button[data-v=buzon] .badge"); if (b) b.remove(); }).catch(() => {});
+}
+function vBuzon() {
+  const rec = mensajes.filter(m => m.para === yo.id), env = mensajes.filter(m => m.de === yo.id), lista = buzonTab === "enviados" ? env : rec;
+  const ayuda = { dueno: "Aquí te escriben los administradores de tus instituciones. Tú puedes responderles o escribirles.", admin: "Escríbele al dueño de SINEVA (soporte, dudas, avisos). Él puede responderte aquí.",
+    docente: "Escríbele a tus alumnos y recibe sus mensajes. Solo puedes escribirles a los alumnos que tienes a tu cargo.", alumno: "Escríbele a tus docentes y recibe sus respuestas. Solo puedes escribirles a los docentes que te dictan clases." }[yo.rol];
+  const b = borradorMsg || {}, vacio = buzonTab === "enviados" ? "No has enviado mensajes todavía." : "Tu buzón está vacío.";
+  const form = destinos.length
+    ? `<form class="form" id="fMensaje" style="max-width:640px"><label>Para<select name="para" required><option value="">Elige a quién…</option>${destinos.map(x => `<option value="${x.id}" ${b.para === x.id ? "selected" : ""}>${esc(x.nombre)} · ${esc(x.detalle)}</option>`).join("")}</select></label>
+        <label>Asunto<input name="asunto" maxlength="120" required value="${esc(b.asunto || "")}"></label>
+        <label>Mensaje<textarea name="cuerpo" rows="4" maxlength="2000" required></textarea></label>
+        <div class="err"></div><button class="btn">Enviar mensaje</button></form>`
+    : `<div class="empty">Por ahora no hay nadie a quien puedas escribirle. ${yo.rol === "alumno" ? "Aparecerán los docentes de tus cursos cuando estés inscrito en ellos." : yo.rol === "docente" ? "Aparecerán tus alumnos cuando tengan cuenta y estén a tu cargo." : "Aparecerá cuando haya alguien con cuenta activa."}</div>`;
+  return `<div class="card"><h2>Nuevo mensaje</h2><p style="color:var(--mute);margin:0 0 10px">${ayuda}</p>${form}</div>
+  <div class="tabs" style="max-width:360px"><button class="${buzonTab !== "enviados" ? "on" : ""}" data-a="buzon-tab" data-t="recibidos">Recibidos${sinLeerMsg() ? ` (${sinLeerMsg()})` : ""}</button><button class="${buzonTab === "enviados" ? "on" : ""}" data-a="buzon-tab" data-t="enviados">Enviados</button></div>
+  <div class="card"><h2>${buzonTab === "enviados" ? "Mensajes enviados" : "Mensajes recibidos"} <small>${lista.length}</small></h2>${lista.map(m => {
+    const recibido = m.para === yo.id, nuevo = recibido && !m.leido;
+    return `<div style="padding:10px 0;border-top:1px solid var(--row);display:flex;gap:10px;justify-content:space-between;align-items:flex-start"><div style="min-width:0"><div>${nuevo ? `<span class="pill" style="min-width:0;background:var(--red);padding:1px 8px;font-size:11px">Nuevo</span> ` : ""}<b>${esc(m.asunto)}</b></div>
+      <small>${recibido ? "De " + esc(m.de_nombre) + (m.de_detalle ? " · " + esc(m.de_detalle) : "") : "Para " + esc(m.para_nombre)} · ${fechaHora(m.creado)}</small><div style="white-space:pre-wrap;margin-top:4px;overflow-wrap:anywhere">${esc(m.cuerpo)}</div></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${recibido ? `<button class="btn sec sm" data-a="msg-resp" data-id="${m.id}">Responder</button>` : ""}<button class="btn del" data-a="msg-del" data-id="${m.id}">Eliminar</button></div></div>`;
+  }).join("") || `<div class="empty">${vacio}</div>`}</div>`;
 }
 /* ===== Directorio del dueño: todas las personas, por institución / carrera / ciclo / curso (universidad) o institución / grado (colegio) ===== */
 function vDirectorio() {
@@ -2146,6 +2187,14 @@ const acciones = {
   },
   async "gra-doc-todos"(d) { try { await rpc("asignar_docente_grado", { p_docente: d.d, p_grado: Number(d.g), p_asignar: d.on === "1" }); await refrescarGrados(); toast(d.on === "1" ? "Cursos asignados al docente." : "Cursos quitados al docente."); } catch (e) { toast(e.message); } },
   async "anuncio-del"(d) { if (!confirm("¿Quitar este anuncio?")) return; try { await rpc("eliminar_anuncio", { p_id: idNum(d) }); await recargarExtra(); render(); toast("Anuncio quitado."); } catch (e) { toast(e.message); } },
+  "buzon-tab"(d) { buzonTab = d.t === "enviados" ? "enviados" : "recibidos"; render(); },
+  "msg-resp"(d) {
+    const m = mensajes.find(x => x.id === idNum(d)); if (!m) return;
+    if (!destinos.some(x => x.id === m.de)) { toast("Ya no puedes escribirle a esta persona."); return; }
+    borradorMsg = { para: m.de, asunto: /^Re:/i.test(m.asunto) ? m.asunto : "Re: " + m.asunto }; buzonTab = "recibidos"; render(); window.scrollTo({ top: 0, behavior: "smooth" });
+    setTimeout(() => { const t = document.querySelector("#fMensaje textarea"); if (t) t.focus(); }, 60);
+  },
+  async "msg-del"(d) { if (!confirm("¿Eliminar este mensaje de tu buzón?")) return; try { await rpc("eliminar_mensaje", { p_id: idNum(d) }); mensajes = mensajes.filter(x => x.id !== idNum(d)); render(); toast("Mensaje eliminado."); } catch (e) { toast(e.message); } },
   "proceso-cerrar"() { cerrarProceso(); },
   "aviso-ok"() { guardarLocal("aviso_ok", "1"); const e = $("#avisoCookies"); if (e) e.remove(); montarLegal(); },
   legal() { abrirDlg(htmlLegal()); },
@@ -2523,6 +2572,9 @@ document.addEventListener("submit", ev => {
       const id = await rpc("crear_curso", { p_nombre: d.nombre }); await rpc("asignar_grado_curso", { p_curso: id, p_grado: gradoSel }); await refrescarGrados(); toast("Curso agregado al grado.");
     } else if (f.id === "fAnuncio") {
       await rpc("crear_anuncio", { p_titulo: d.titulo, p_cuerpo: d.cuerpo || "", p_para: d.para }); await recargarExtra(); render(); toast("Anuncio publicado. Cada destinatario recibe un aviso en la campana 🔔.");
+    } else if (f.id === "fMensaje") {
+      if (!d.para) falla("Elige a quién va el mensaje.");
+      await rpc("enviar_mensaje", { p_para: d.para, p_asunto: d.asunto, p_cuerpo: d.cuerpo }); borradorMsg = null; await recargarExtra(); buzonTab = "enviados"; render(); toast("Mensaje enviado.");
     } else if (f.id === "fTarea") {
 
       const file = d.archivo && d.archivo.size ? d.archivo : null, curso = Number(d.curso);
